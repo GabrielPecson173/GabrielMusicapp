@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Android Music app</string>
+    <string name="download_notification_channel_name">Music Downloads</string>
+</resources>
