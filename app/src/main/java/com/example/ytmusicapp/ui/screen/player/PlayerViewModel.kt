@@ -36,18 +36,14 @@ class PlayerViewModel @Inject constructor(
 
     private var mediaController: MediaController? = null
 
-    init {
-        startPositionUpdater()
-    }
+    init { startPositionUpdater() }
 
     private fun startPositionUpdater() {
         viewModelScope.launch {
             while (true) {
                 delay(500)
                 mediaController?.let { c ->
-                    _uiState.value = _uiState.value.copy(
-                        positionMs = c.currentPosition
-                    )
+                    _uiState.value = _uiState.value.copy(positionMs = c.currentPosition)
                 }
             }
         }
@@ -59,7 +55,6 @@ class PlayerViewModel @Inject constructor(
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 _uiState.value = _uiState.value.copy(isPlaying = isPlaying)
             }
-
             override fun onPlaybackStateChanged(state: Int) {
                 if (state == Player.STATE_READY) {
                     _uiState.value = _uiState.value.copy(
@@ -74,6 +69,11 @@ class PlayerViewModel @Inject constructor(
     fun releaseController() {
         mediaController?.release()
         mediaController = null
+    }
+
+    // Call this BEFORE navigating to PlayerScreen
+    fun setTrack(track: Track) {
+        _uiState.value = _uiState.value.copy(track = track)
     }
 
     fun loadTrack(videoId: String) {
@@ -94,10 +94,7 @@ class PlayerViewModel @Inject constructor(
                     isPlaying = true
                 )
             } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(
-                    isLoading = false,
-                    error = e.message
-                )
+                _uiState.value = _uiState.value.copy(isLoading = false, error = e.message)
             }
         }
     }
@@ -119,10 +116,7 @@ class PlayerViewModel @Inject constructor(
 
     fun onStop() {
         mediaController?.stop()
-        _uiState.value = _uiState.value.copy(
-            isPlaying = false,
-            positionMs = 0L
-        )
+        _uiState.value = _uiState.value.copy(isPlaying = false, positionMs = 0L)
     }
 
     override fun onCleared() {

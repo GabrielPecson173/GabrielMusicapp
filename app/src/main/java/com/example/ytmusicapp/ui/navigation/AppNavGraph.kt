@@ -47,42 +47,37 @@ private val bottomNavItems = listOf(
 
 @androidx.compose.material3.ExperimentalMaterial3Api
 @Composable
-fun AppNavGraph(
-    playerViewModel: PlayerViewModel = hiltViewModel()
-) {
+fun AppNavGraph() {
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
 
     val isPlayerScreen = currentDestination?.hasRoute(Screen.Player::class) == true
 
+    // Activity-scoped — same instance across all screens
+    val playerViewModel: PlayerViewModel = hiltViewModel()
     val playerState by playerViewModel.uiState.collectAsStateWithLifecycle()
 
-    // Derive 0f..1f progress from positionMs / durationMs
     val progress = if (playerState.durationMs > 0L) {
         (playerState.positionMs.toFloat() / playerState.durationMs.toFloat()).coerceIn(0f, 1f)
-    } else {
-        0f
-    }
+    } else 0f
 
     Scaffold(
         bottomBar = {
             if (!isPlayerScreen) {
                 Column {
-                    // MiniPlayer only when a track is loaded
                     playerState.track?.let { track ->
                         MiniPlayer(
                             track = track,
                             isPlaying = playerState.isPlaying,
                             progress = progress,
                             onPlayPause = playerViewModel::onPlayPause,
-                            onSkipNext = { /* no queue yet — no-op */ },
+                            onSkipNext = {},
                             onExpand = {
                                 navController.navigate(Screen.Player(track.id))
                             }
                         )
                     }
-
                     NavigationBar {
                         bottomNavItems.forEach { item ->
                             NavigationBarItem(
@@ -112,8 +107,18 @@ fun AppNavGraph(
         ) {
             composable<Screen.Home> {
                 HomeScreen(
+                    playerViewModel = playerViewModel,
                     onTrackClick = { trackId ->
                         navController.navigate(Screen.Player(trackId))
+                    },
+                    onSearchClick = {
+                        navController.navigate(Screen.Search) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
                     }
                 )
             }
