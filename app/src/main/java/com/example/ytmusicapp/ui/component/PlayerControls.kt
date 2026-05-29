@@ -10,6 +10,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Repeat
+import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
@@ -22,16 +23,21 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.example.ytmusicapp.ui.screen.player.RepeatMode
 
 @Composable
 fun PlayerControls(
     isPlaying: Boolean,
     positionMs: Long,
     durationMs: Long,
+    isShuffle: Boolean,
+    repeatMode: RepeatMode,
     onPlayPause: () -> Unit,
     onSeek: (Long) -> Unit,
     onSkipNext: () -> Unit,
     onSkipPrevious: () -> Unit,
+    onToggleShuffle: () -> Unit,
+    onToggleRepeat: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -42,9 +48,7 @@ fun PlayerControls(
     ) {
         Slider(
             value = if (durationMs > 0) positionMs / durationMs.toFloat() else 0f,
-            onValueChange = { fraction ->
-                onSeek((fraction * durationMs).toLong())
-            },
+            onValueChange = { fraction -> onSeek((fraction * durationMs).toLong()) },
             modifier = Modifier.fillMaxWidth()
         )
 
@@ -71,11 +75,12 @@ fun PlayerControls(
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = {}) {
+            IconButton(onClick = onToggleShuffle) {
                 Icon(
                     imageVector = Icons.Default.Shuffle,
                     contentDescription = "Shuffle",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    tint = if (isShuffle) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
 
@@ -89,8 +94,7 @@ fun PlayerControls(
 
             IconButton(onClick = onPlayPause) {
                 Icon(
-                    imageVector = if (isPlaying) Icons.Default.Pause
-                    else Icons.Default.PlayArrow,
+                    imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                     contentDescription = if (isPlaying) "Pause" else "Play",
                     modifier = Modifier.size(52.dp)
                 )
@@ -104,11 +108,15 @@ fun PlayerControls(
                 )
             }
 
-            IconButton(onClick = {}) {
+            IconButton(onClick = onToggleRepeat) {
                 Icon(
-                    imageVector = Icons.Default.Repeat,
+                    imageVector = when (repeatMode) {
+                        RepeatMode.ONE -> Icons.Default.RepeatOne
+                        else -> Icons.Default.Repeat
+                    },
                     contentDescription = "Repeat",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    tint = if (repeatMode != RepeatMode.NONE) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }

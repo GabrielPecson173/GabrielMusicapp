@@ -28,7 +28,9 @@ object AppModule {
         ctx,
         AppDatabase::class.java,
         "ytmusic.db"
-    ).build()
+    )
+        .addMigrations(AppDatabase.MIGRATION_1_2)
+        .build()
 
     @Provides
     @Singleton
@@ -41,6 +43,10 @@ object AppModule {
     @Provides
     @Singleton
     fun provideDownloadDao(db: AppDatabase) = db.downloadDao()
+
+    @Provides
+    @Singleton
+    fun provideQueueDao(db: AppDatabase) = db.queueDao()
 
     @Provides
     @Singleton

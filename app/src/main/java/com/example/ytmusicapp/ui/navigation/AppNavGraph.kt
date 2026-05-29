@@ -1,5 +1,6 @@
 package com.example.ytmusicapp.ui.navigation
 
+import android.content.ComponentName
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Icon
@@ -13,10 +14,14 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.media3.session.MediaController
+import androidx.media3.session.SessionToken
 import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
@@ -24,6 +29,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
+import com.example.ytmusicapp.playback.AudioPlaybackService
 import com.example.ytmusicapp.ui.component.MiniPlayer
 import com.example.ytmusicapp.ui.screen.downloads.DownloadsScreen
 import com.example.ytmusicapp.ui.screen.home.HomeScreen
@@ -31,6 +37,7 @@ import com.example.ytmusicapp.ui.screen.library.LibraryScreen
 import com.example.ytmusicapp.ui.screen.player.PlayerScreen
 import com.example.ytmusicapp.ui.screen.player.PlayerViewModel
 import com.example.ytmusicapp.ui.screen.search.SearchScreen
+import com.google.common.util.concurrent.MoreExecutors
 
 private data class BottomNavItem(
     val label: String,
@@ -48,15 +55,32 @@ private val bottomNavItems = listOf(
 @androidx.compose.material3.ExperimentalMaterial3Api
 @Composable
 fun AppNavGraph() {
+    val context = LocalContext.current
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
 
     val isPlayerScreen = currentDestination?.hasRoute(Screen.Player::class) == true
 
-    // Activity-scoped — same instance across all screens
     val playerViewModel: PlayerViewModel = hiltViewModel()
     val playerState by playerViewModel.uiState.collectAsStateWithLifecycle()
+
+    // Controller lives here — survives navigation
+    DisposableEffect(Unit) {
+        val sessionToken = SessionToken(
+            context,
+            ComponentName(context, AudioPlaybackService::class.java)
+        )
+        val controllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
+        controllerFuture.addListener({
+            val controller = controllerFuture.get()
+            playerViewModel.setMediaController(controller)
+        }, MoreExecutors.directExecutor())
+
+        onDispose {
+            MediaController.releaseFuture(controllerFuture)
+        }
+    }
 
     val progress = if (playerState.durationMs > 0L) {
         (playerState.positionMs.toFloat() / playerState.durationMs.toFloat()).coerceIn(0f, 1f)
@@ -74,7 +98,9 @@ fun AppNavGraph() {
                             onPlayPause = playerViewModel::onPlayPause,
                             onSkipNext = {},
                             onExpand = {
-                                navController.navigate(Screen.Player(track.id))
+                                navController.navigate(Screen.Player(track.id)) {
+                                    launchSingleTop = true
+                                }
                             }
                         )
                     }
@@ -126,7 +152,8 @@ fun AppNavGraph() {
                 SearchScreen(
                     onTrackClick = { trackId ->
                         navController.navigate(Screen.Player(trackId))
-                    }
+                    },
+                    playerViewModel = playerViewModel
                 )
             }
             composable<Screen.Library> {
@@ -147,7 +174,8 @@ fun AppNavGraph() {
                 val player: Screen.Player = backStackEntry.toRoute()
                 PlayerScreen(
                     trackId = player.trackId,
-                    onBack = { navController.popBackStack() }
+                    onBack = { navController.popBackStack() },
+                    viewModel = playerViewModel
                 )
             }
         }

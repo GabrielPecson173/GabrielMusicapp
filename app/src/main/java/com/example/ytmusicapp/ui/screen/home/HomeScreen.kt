@@ -183,6 +183,7 @@ fun HomeScreen(
                                 track = track,
                                 onClick = {
                                     playerViewModel.setTrack(track)
+                                    playerViewModel.setQueue(listOf(track), 0)  // ← only seed track
                                     onTrackClick(track.id)
                                 },
                                 onDownloadClick = {},

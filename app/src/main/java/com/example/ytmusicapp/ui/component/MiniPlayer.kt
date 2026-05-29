@@ -49,7 +49,6 @@ fun MiniPlayer(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { onExpand() }
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -57,13 +56,16 @@ fun MiniPlayer(
                 AsyncImage(
                     model = track.thumbnailUrl,
                     contentDescription = null,
-                    modifier = Modifier.size(40.dp)
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clickable { onExpand() }
                 )
 
                 Column(
                     modifier = Modifier
                         .weight(1f)
                         .padding(horizontal = 12.dp)
+                        .clickable { onExpand() }
                 ) {
                     Text(
                         text = track.title,

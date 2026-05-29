@@ -26,11 +26,13 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ytmusicapp.ui.component.TrackListItem
+import com.example.ytmusicapp.ui.screen.player.PlayerViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SearchScreen(
     onTrackClick: (String) -> Unit,
+    playerViewModel: PlayerViewModel,
     viewModel: SearchViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -45,9 +47,7 @@ fun SearchScreen(
                     expanded = false,
                     onExpandedChange = {},
                     placeholder = { Text("Search songs, artists...") },
-                    leadingIcon = {
-                        Icon(Icons.Default.Search, contentDescription = null)
-                    },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                     trailingIcon = {
                         if (uiState.query.isNotEmpty()) {
                             IconButton(onClick = viewModel::clearQuery) {
@@ -67,21 +67,15 @@ fun SearchScreen(
         Box(modifier = Modifier.fillMaxSize()) {
             when {
                 uiState.isLoading -> {
-                    CircularProgressIndicator(
-                        modifier = Modifier.align(Alignment.Center)
-                    )
+                    CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
                 }
-
                 uiState.error != null -> {
                     Text(
                         text = uiState.error!!,
                         color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier
-                            .align(Alignment.Center)
-                            .padding(16.dp)
+                        modifier = Modifier.align(Alignment.Center).padding(16.dp)
                     )
                 }
-
                 uiState.results.isEmpty() && uiState.query.isNotEmpty() -> {
                     Text(
                         text = "No results found",
@@ -89,7 +83,6 @@ fun SearchScreen(
                         modifier = Modifier.align(Alignment.Center)
                     )
                 }
-
                 uiState.query.isEmpty() -> {
                     Text(
                         text = "Search for music",
@@ -98,13 +91,17 @@ fun SearchScreen(
                         modifier = Modifier.align(Alignment.Center)
                     )
                 }
-
                 else -> {
                     LazyColumn(modifier = Modifier.fillMaxSize()) {
                         items(uiState.results) { track ->
                             TrackListItem(
                                 track = track,
-                                onClick = { onTrackClick(track.id) },
+                                onClick = {
+                                    val index = uiState.results.indexOf(track)
+                                    playerViewModel.setQueue(uiState.results, index)
+                                    playerViewModel.setTrack(track)
+                                    onTrackClick(track.id)
+                                },
                                 onDownloadClick = {},
                                 modifier = Modifier.fillMaxWidth()
                             )

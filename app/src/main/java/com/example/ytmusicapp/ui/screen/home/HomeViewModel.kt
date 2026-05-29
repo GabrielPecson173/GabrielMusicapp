@@ -2,10 +2,12 @@ package com.example.ytmusicapp.ui.screen.home
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.ytmusicapp.data.repository.QueueRepository
 import com.example.ytmusicapp.domain.model.Track
 import com.example.ytmusicapp.domain.usecase.SearchMusicUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -33,7 +35,8 @@ private val SECTIONS = listOf(
 
 @HiltViewModel
 class HomeViewModel @Inject constructor(
-    private val searchMusicUseCase: SearchMusicUseCase
+    private val searchMusicUseCase: SearchMusicUseCase,
+    private val queueRepository: QueueRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HomeUiState())
@@ -51,10 +54,13 @@ class HomeViewModel @Inject constructor(
                         val tracks = searchMusicUseCase(query).shuffled().take(10)
                         HomeSection(title, tracks)
                     }
-                }.map { it.await() }
+                }.awaitAll()
                     .filter { it.tracks.isNotEmpty() }
 
                 _uiState.value = HomeUiState(sections = fetched)
+
+                val allTracks = fetched.flatMap { it.tracks }
+                queueRepository.saveTracksToLibrary(allTracks)
             } catch (e: Exception) {
                 _uiState.value = HomeUiState(error = e.message)
             }
