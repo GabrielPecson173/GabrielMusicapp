@@ -73,16 +73,18 @@ class QueueRepository @Inject constructor(
 
     suspend fun generateRelatedTracks(seedTrack: Track, limit: Int = 20): List<Track> {
         val queries = listOf(
-            "songs like ${seedTrack.title}",
-            "${seedTrack.artist} similar artists",
-            "${seedTrack.artist} mix"
+            "${seedTrack.artist} mix",
+            "songs like ${seedTrack.artist}",
+            "similar to ${seedTrack.artist}"
         )
         val results = queries.flatMap { query ->
             try { searchMusicUseCase(query) } catch (_: Exception) { emptyList() }
         }
         return results
-            .distinctBy { it.id }
             .filter { it.id != seedTrack.id }
+            .filter { !it.title.contains(seedTrack.title, ignoreCase = true) } // drop same-title variants
+            .distinctBy { it.id }
+            .shuffled()
             .take(limit)
     }
 

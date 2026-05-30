@@ -97,9 +97,8 @@ fun SearchScreen(
                             TrackListItem(
                                 track = track,
                                 onClick = {
-                                    val index = uiState.results.indexOf(track)
-                                    playerViewModel.setQueue(uiState.results, index)
                                     playerViewModel.setTrack(track)
+                                    playerViewModel.setQueue(listOf(track), 0)
                                     onTrackClick(track.id)
                                 },
                                 onDownloadClick = {},
