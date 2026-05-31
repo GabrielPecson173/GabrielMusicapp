@@ -31,7 +31,6 @@ import com.example.ytmusicapp.data.tracker.EventTracker
 import com.example.ytmusicapp.ui.component.TrackListItem
 import com.example.ytmusicapp.ui.screen.player.PlayerViewModel
 
-// ── Palette ──────────────────────────────────────────────────────────────────
 private val LimeGreen       = Color(0xFF84CC16)
 private val LimeGreenBright = Color(0xFFBEF264)
 private val LimeGreenMid    = Color(0xFF4D7C0F)
@@ -41,7 +40,6 @@ private val Surface3        = Color(0xFF252525)
 private val TextPrimary     = Color(0xFFEFEFEF)
 private val TextSecondary   = Color(0xFF888888)
 
-// Maps normalized genre key → display label for chips
 private fun genreLabel(genre: String): String =
     if (genre == "all") "All" else GENRE_DISPLAY_NAMES[genre] ?: genre.replaceFirstChar { it.uppercase() }
 
@@ -61,7 +59,6 @@ fun HomeScreen(
             .fillMaxSize()
             .background(DarkBg)
     ) {
-        // ── Top Bar ──────────────────────────────────────────────────────────
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -104,7 +101,6 @@ fun HomeScreen(
             }
         }
 
-        // ── Search Bar ───────────────────────────────────────────────────────
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -138,7 +134,6 @@ fun HomeScreen(
             }
         }
 
-        // ── Genre Chips — dynamic from VM ────────────────────────────────────
         LazyRow(
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -162,7 +157,6 @@ fun HomeScreen(
             }
         }
 
-        // ── Feed ─────────────────────────────────────────────────────────────
         PullToRefreshBox(
             isRefreshing = uiState.isLoading,
             onRefresh = { viewModel.refresh() },
@@ -192,14 +186,14 @@ fun HomeScreen(
                     playerViewModel = playerViewModel,
                     onTrackClick = onTrackClick,
                     onSectionImpression = viewModel::onSectionImpression,
-                    onSectionClick = viewModel::onSectionClick
+                    onSectionClick = viewModel::onSectionClick,
+                    onDownloadClick = viewModel::download
                 )
             }
         }
     }
 }
 
-// ── FeedContent ───────────────────────────────────────────────────────────────
 @Composable
 private fun FeedContent(
     sections: List<HomeSection>,
@@ -207,7 +201,8 @@ private fun FeedContent(
     playerViewModel: PlayerViewModel,
     onTrackClick: (String) -> Unit,
     onSectionImpression: (String) -> Unit,
-    onSectionClick: (String) -> Unit
+    onSectionClick: (String) -> Unit,
+    onDownloadClick: (com.example.ytmusicapp.domain.model.Track) -> Unit
 ) {
     val listState = rememberLazyListState()
 
@@ -291,7 +286,7 @@ private fun FeedContent(
                         playerViewModel.setQueue(listOf(track), 0)
                         onTrackClick(track.id)
                     },
-                    onDownloadClick = {},
+                    onDownloadClick = { onDownloadClick(track) },
                     modifier = Modifier.fillMaxWidth()
                 )
             }

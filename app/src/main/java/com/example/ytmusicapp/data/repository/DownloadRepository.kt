@@ -1,22 +1,29 @@
 package com.example.ytmusicapp.data.repository
 
+import android.content.Context
+import android.net.Uri
+import androidx.annotation.OptIn
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.offline.DownloadManager
+import androidx.media3.exoplayer.offline.DownloadRequest
+import androidx.media3.exoplayer.offline.DownloadService
 import com.example.ytmusicapp.data.db.dao.DownloadDao
 import com.example.ytmusicapp.data.db.entity.DownloadEntity
 import com.example.ytmusicapp.domain.model.Track
 import com.example.ytmusicapp.download.DownloadManagerProvider
-import androidx.media3.exoplayer.offline.DownloadRequest
-import androidx.media3.exoplayer.offline.DownloadManager
-import android.net.Uri
+import com.example.ytmusicapp.download.MusicDownloadService
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.first
 import javax.inject.Inject
 import javax.inject.Singleton
 
+@OptIn(UnstableApi::class)
 @Singleton
 class DownloadRepository @Inject constructor(
     private val downloadDao: DownloadDao,
     private val downloadManagerProvider: DownloadManagerProvider,
-    private val musicRepository: MusicRepository
+    @ApplicationContext private val context: Context
 ) {
 
     private val downloadManager: DownloadManager
@@ -32,14 +39,17 @@ class DownloadRepository @Inject constructor(
         downloadDao.getDownloadsByStatus(status)
 
     suspend fun enqueue(track: Track) {
-        val streamInfo = musicRepository.getStreamInfo(track.id)
+        // Custom scheme — ResolvingDataSourceFactory resolves fresh URL at download time
+        val downloadUri = Uri.parse("ytmusic://${track.id}")
 
-        val downloadRequest = DownloadRequest.Builder(
-            track.id,
-            Uri.parse(streamInfo.streamUrl)
-        ).build()
+        val downloadRequest = DownloadRequest.Builder(track.id, downloadUri).build()
 
-        downloadManager.addDownload(downloadRequest)
+        DownloadService.sendAddDownload(
+            context,
+            MusicDownloadService::class.java,
+            downloadRequest,
+            false
+        )
 
         downloadDao.insert(
             DownloadEntity(
@@ -47,22 +57,31 @@ class DownloadRepository @Inject constructor(
                 trackId = track.id,
                 title = track.title,
                 artist = track.artist,
-                filePath = streamInfo.streamUrl,
+                filePath = downloadUri.toString(),
                 status = STATUS_QUEUED
             )
         )
     }
 
     suspend fun cancel(trackId: String) {
-        downloadManager.removeDownload(trackId)
+        DownloadService.sendRemoveDownload(
+            context,
+            MusicDownloadService::class.java,
+            trackId,
+            false
+        )
         downloadDao.updateStatus(trackId, STATUS_CANCELLED)
     }
 
     suspend fun remove(trackId: String) {
-        downloadManager.removeDownload(trackId)
-        downloadDao.getDownloadByTrackId(trackId).collect { entity ->
-            entity?.let { downloadDao.delete(it) }
-        }
+        DownloadService.sendRemoveDownload(
+            context,
+            MusicDownloadService::class.java,
+            trackId,
+            false
+        )
+        val entity = downloadDao.getDownloadByTrackId(trackId).first()
+        entity?.let { downloadDao.delete(it) }
     }
 
     suspend fun updateStatus(trackId: String, status: String) =

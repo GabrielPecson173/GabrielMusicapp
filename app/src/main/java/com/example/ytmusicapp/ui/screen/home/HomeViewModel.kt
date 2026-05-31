@@ -5,6 +5,8 @@ import androidx.lifecycle.viewModelScope
 import com.example.ytmusicapp.data.repository.HomeFeedRepository
 import com.example.ytmusicapp.data.repository.HomeSection
 import com.example.ytmusicapp.data.repository.RecommendationRepository
+import com.example.ytmusicapp.domain.model.Track
+import com.example.ytmusicapp.domain.usecase.DownloadTrackUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -16,7 +18,7 @@ import javax.inject.Inject
 
 data class HomeUiState(
     val sections: List<HomeSection> = emptyList(),
-    val fullFeedSections: List<HomeSection> = emptyList(), // always holds full feed
+    val fullFeedSections: List<HomeSection> = emptyList(),
     val isLoading: Boolean = false,
     val error: String? = null,
     val selectedGenre: String = "all",
@@ -26,7 +28,8 @@ data class HomeUiState(
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val homeFeedRepository: HomeFeedRepository,
-    private val recommendationRepository: RecommendationRepository
+    private val recommendationRepository: RecommendationRepository,
+    private val downloadTrackUseCase: DownloadTrackUseCase
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HomeUiState(isLoading = true))
@@ -47,7 +50,6 @@ class HomeViewModel @Inject constructor(
                 }
                 .collect { sections ->
                     _uiState.update { state ->
-                        // Only replace visible sections if "all" is selected
                         val visibleSections = if (state.selectedGenre == "all") sections else state.sections
                         state.copy(
                             fullFeedSections = sections,
@@ -67,6 +69,18 @@ class HomeViewModel @Inject constructor(
         }
     }
 
+    // ── Download ──────────────────────────────────────────────────────────────
+
+    fun download(track: Track) {
+        viewModelScope.launch {
+            try {
+                downloadTrackUseCase(track)
+            } catch (e: Exception) {
+                _uiState.update { it.copy(error = "Download failed: ${e.message}") }
+            }
+        }
+    }
+
     // ── Genre chips ───────────────────────────────────────────────────────────
 
     private fun loadAvailableGenres() {
@@ -78,7 +92,6 @@ class HomeViewModel @Inject constructor(
 
     fun selectGenre(genre: String) {
         if (genre == "all") {
-            // Restore full feed immediately — no network call needed
             _uiState.update { state ->
                 state.copy(
                     selectedGenre = "all",

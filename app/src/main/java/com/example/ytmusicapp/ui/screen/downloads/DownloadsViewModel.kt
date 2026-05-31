@@ -10,6 +10,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -30,26 +31,23 @@ class DownloadsViewModel @Inject constructor(
     val uiState: StateFlow<DownloadsUiState> = _uiState.asStateFlow()
 
     init {
-        observeActive()
-        observeCompleted()
+        observeDownloads()
     }
 
-    private fun observeActive() {
+    private fun observeDownloads() {
         viewModelScope.launch {
-            downloadRepository.getDownloadsByStatus(
-                DownloadRepository.STATUS_DOWNLOADING
-            ).collect { active ->
-                _uiState.value = _uiState.value.copy(active = active)
-            }
-        }
-    }
-
-    private fun observeCompleted() {
-        viewModelScope.launch {
-            downloadRepository.getDownloadsByStatus(
-                DownloadRepository.STATUS_COMPLETED
-            ).collect { completed ->
-                _uiState.value = _uiState.value.copy(completed = completed)
+            // Combine QUEUED + DOWNLOADING into single active list
+            combine(
+                downloadRepository.getDownloadsByStatus(DownloadRepository.STATUS_QUEUED),
+                downloadRepository.getDownloadsByStatus(DownloadRepository.STATUS_DOWNLOADING),
+                downloadRepository.getDownloadsByStatus(DownloadRepository.STATUS_COMPLETED)
+            ) { queued, downloading, completed ->
+                Triple(queued + downloading, completed, null as String?)
+            }.collect { (active, completed, _) ->
+                _uiState.value = _uiState.value.copy(
+                    active = active,
+                    completed = completed
+                )
             }
         }
     }
@@ -82,5 +80,9 @@ class DownloadsViewModel @Inject constructor(
                 _uiState.value = _uiState.value.copy(error = e.message)
             }
         }
+    }
+
+    fun clearError() {
+        _uiState.value = _uiState.value.copy(error = null)
     }
 }

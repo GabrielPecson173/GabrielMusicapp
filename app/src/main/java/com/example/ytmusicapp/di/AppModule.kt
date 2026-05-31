@@ -40,59 +40,22 @@ object AppModule {
 
     // ── Core DAOs ─────────────────────────────────────────────────────────────
 
-    @Provides
-    @Singleton
-    fun provideTrackDao(db: AppDatabase) = db.trackDao()
-
-    @Provides
-    @Singleton
-    fun providePlaylistDao(db: AppDatabase) = db.playlistDao()
-
-    @Provides
-    @Singleton
-    fun provideDownloadDao(db: AppDatabase) = db.downloadDao()
-
-    @Provides
-    @Singleton
-    fun provideQueueDao(db: AppDatabase) = db.queueDao()
+    @Provides @Singleton fun provideTrackDao(db: AppDatabase) = db.trackDao()
+    @Provides @Singleton fun providePlaylistDao(db: AppDatabase) = db.playlistDao()
+    @Provides @Singleton fun provideDownloadDao(db: AppDatabase) = db.downloadDao()
+    @Provides @Singleton fun provideQueueDao(db: AppDatabase) = db.queueDao()
 
     // ── Recommendation DAOs ───────────────────────────────────────────────────
 
-    @Provides
-    @Singleton
-    fun providePlayEventDao(db: AppDatabase) = db.playEventDao()
-
-    @Provides
-    @Singleton
-    fun provideSkipEventDao(db: AppDatabase) = db.skipEventDao()
-
-    @Provides
-    @Singleton
-    fun provideSearchEventDao(db: AppDatabase) = db.searchEventDao()
-
-    @Provides
-    @Singleton
-    fun provideRecommendationCandidateDao(db: AppDatabase) = db.recommendationCandidateDao()
-
-    @Provides
-    @Singleton
-    fun provideHomeFeedSectionDao(db: AppDatabase) = db.homeFeedSectionDao()
-
-    @Provides
-    @Singleton
-    fun provideTrackEmbeddingDao(db: AppDatabase) = db.trackEmbeddingDao()
-
-    @Provides
-    @Singleton
-    fun provideSuppressionDao(db: AppDatabase) = db.suppressionDao()
-
-    @Provides
-    @Singleton
-    fun provideSessionPairDao(db: AppDatabase) = db.sessionPairDao()
-
-    @Provides
-    @Singleton
-    fun provideShelfImpressionDao(db: AppDatabase) = db.shelfImpressionDao()
+    @Provides @Singleton fun providePlayEventDao(db: AppDatabase) = db.playEventDao()
+    @Provides @Singleton fun provideSkipEventDao(db: AppDatabase) = db.skipEventDao()
+    @Provides @Singleton fun provideSearchEventDao(db: AppDatabase) = db.searchEventDao()
+    @Provides @Singleton fun provideRecommendationCandidateDao(db: AppDatabase) = db.recommendationCandidateDao()
+    @Provides @Singleton fun provideHomeFeedSectionDao(db: AppDatabase) = db.homeFeedSectionDao()
+    @Provides @Singleton fun provideTrackEmbeddingDao(db: AppDatabase) = db.trackEmbeddingDao()
+    @Provides @Singleton fun provideSuppressionDao(db: AppDatabase) = db.suppressionDao()
+    @Provides @Singleton fun provideSessionPairDao(db: AppDatabase) = db.sessionPairDao()
+    @Provides @Singleton fun provideShelfImpressionDao(db: AppDatabase) = db.shelfImpressionDao()
 
     // ── Other ─────────────────────────────────────────────────────────────────
 

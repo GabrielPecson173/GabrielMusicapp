@@ -3,6 +3,7 @@ package com.example.ytmusicapp
 import android.app.Application
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
+import com.example.ytmusicapp.download.DownloadStatusListener
 import com.example.ytmusicapp.worker.WorkerScheduler
 import dagger.hilt.android.HiltAndroidApp
 import okhttp3.OkHttpClient
@@ -17,6 +18,7 @@ class App : Application(), Configuration.Provider {
 
     @Inject lateinit var workerFactory: HiltWorkerFactory
     @Inject lateinit var workerScheduler: WorkerScheduler
+    @Inject lateinit var downloadStatusListener: DownloadStatusListener
 
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder()
@@ -27,6 +29,7 @@ class App : Application(), Configuration.Provider {
         super.onCreate()
         initNewPipe()
         workerScheduler.scheduleAll()
+        downloadStatusListener.register() // ← was missing .register()
     }
 
     private fun initNewPipe() {
@@ -35,6 +38,8 @@ class App : Application(), Configuration.Provider {
 
             override fun execute(request: Request): Response {
                 val reqBuilder = okhttp3.Request.Builder().url(request.url())
+
+                reqBuilder.header("Cookie", "CONSENT=YES+; SOCS=CAI")
 
                 request.headers().forEach { (key, values) ->
                     values.forEach { value -> reqBuilder.addHeader(key, value) }

@@ -1,6 +1,8 @@
 package com.example.ytmusicapp.data.extraction
 
 import com.example.ytmusicapp.domain.model.StreamInfo
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -16,90 +18,115 @@ class InnerTubeClient @Inject constructor(
 ) {
 
     companion object {
-        private const val INNERTUBE_BASE = "https://music.youtube.com/youtubei/v1"
-        private const val PLAYER_ENDPOINT = "$INNERTUBE_BASE/player"
-        private const val API_KEY = "AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30"
+        private const val API_KEY = "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8"
+        private const val PLAYER_URL =
+            "https://www.youtube.com/youtubei/v1/player?prettyPrint=false&key=$API_KEY"
 
-        private val CLIENT_CONFIG = mapOf(
-            "clientName" to "MWEB",
-            "clientVersion" to "2.20240726.01.00"
-        )
+        private const val CLIENT_NAME    = "ANDROID_TESTSUITE"
+        private const val CLIENT_VERSION = "1.9"
+        private const val CLIENT_ID      = "30"
+        private const val USER_AGENT     =
+            "Mozilla/5.0 (Linux; Android 11; sdk_gphone_x86) AppleWebKit/537.36"
     }
 
-    suspend fun getStream(videoId: String): StreamInfo {
-        val poToken = poTokenGenerator.generatePoToken(videoId)
-        val body = buildRequestBody(videoId, poToken)
+    suspend fun getStream(videoId: String): StreamInfo = withContext(Dispatchers.IO) {
+        val body = buildRequestBody(videoId)
 
         val request = Request.Builder()
-            .url("$PLAYER_ENDPOINT?key=$API_KEY")
+            .url(PLAYER_URL)
             .post(body.toRequestBody("application/json".toMediaType()))
             .header("Content-Type", "application/json")
-            .header("X-YouTube-Client-Name", "2")
-            .header("X-YouTube-Client-Version", CLIENT_CONFIG["clientVersion"]!!)
-            .header("Origin", "https://music.youtube.com")
-            .header("Referer", "https://music.youtube.com/")
+            .header("User-Agent", USER_AGENT)
+            .header("X-YouTube-Client-Name", CLIENT_ID)
+            .header("X-YouTube-Client-Version", CLIENT_VERSION)
+            .header("X-Goog-Api-Key", API_KEY)
             .build()
 
         val response = okHttpClient.newCall(request).execute()
+        if (!response.isSuccessful) throw Exception("HTTP ${response.code}")
 
-        if (!response.isSuccessful) {
-            throw Exception("InnerTube request failed: ${response.code}")
+        val json   = JSONObject(response.body?.string() ?: throw Exception("Empty response"))
+        val status = json.optJSONObject("playabilityStatus")?.optString("status")
+        android.util.Log.d("InnerTubeClient", "status=$status videoId=$videoId")
+
+        if (status != "OK") {
+            val reason = json.optJSONObject("playabilityStatus")
+                ?.optString("reason", "unknown")
+            throw Exception("playabilityStatus=$status reason=$reason")
         }
 
-        val json = JSONObject(response.body?.string() ?: throw Exception("Empty response"))
-        return parseStreamInfo(videoId, json)
+        parseStreamInfo(videoId, json)
     }
 
-    private fun buildRequestBody(videoId: String, poToken: String): String {
-        return JSONObject().apply {
-            put("videoId", videoId)
-            put("context", JSONObject().apply {
-                put("client", JSONObject().apply {
-                    put("clientName", CLIENT_CONFIG["clientName"])
-                    put("clientVersion", CLIENT_CONFIG["clientVersion"])
-                    put("hl", "en")
-                    put("gl", "US")
-                })
+    private fun buildRequestBody(videoId: String): String = JSONObject().apply {
+        put("videoId", videoId)
+        put("context", JSONObject().apply {
+            put("client", JSONObject().apply {
+                put("clientName", CLIENT_NAME)
+                put("clientVersion", CLIENT_VERSION)
+                put("androidSdkVersion", 30)
+                put("hl", "en")
+                put("gl", "US")
+                put("utcOffsetMinutes", 0)
             })
-            put("serviceIntegrityDimensions", JSONObject().apply {
-                put("poToken", poToken)
-            })
-            put("racyCheckOk", true)
-            put("contentCheckOk", true)
-        }.toString()
-    }
+        })
+        put("racyCheckOk", true)
+        put("contentCheckOk", true)
+    }.toString()
 
     private fun parseStreamInfo(videoId: String, json: JSONObject): StreamInfo {
-        val streamingData = json.getJSONObject("streamingData")
-        val formats = streamingData.getJSONArray("adaptiveFormats")
+        val streamingData = json.optJSONObject("streamingData")
+            ?: throw Exception("No streamingData for $videoId")
 
-        // Pick highest bitrate audio-only stream
-        var bestUrl = ""
+        val adaptive = streamingData.optJSONArray("adaptiveFormats")
+        val formats  = streamingData.optJSONArray("formats")
+
+        var bestUrl     = ""
         var bestBitrate = 0
-        var bestMime = ""
-        var durationMs = 0L
+        var bestMime    = ""
+        var durationMs  = 0L
 
-        for (i in 0 until formats.length()) {
-            val format = formats.getJSONObject(i)
-            val mime = format.optString("mimeType", "")
-            if (!mime.startsWith("audio/")) continue
-
-            val bitrate = format.optInt("bitrate", 0)
-            if (bitrate > bestBitrate) {
-                bestBitrate = bitrate
-                bestUrl = format.optString("url", "")
-                bestMime = mime
-                durationMs = format.optLong("approxDurationMs", 0L)
+        if (adaptive != null) {
+            for (i in 0 until adaptive.length()) {
+                val fmt     = adaptive.getJSONObject(i)
+                val mime    = fmt.optString("mimeType", "")
+                val url     = fmt.optString("url", "")
+                if (!mime.startsWith("audio/") || url.isBlank()) continue
+                val bitrate = fmt.optInt("bitrate", 0)
+                if (bitrate > bestBitrate) {
+                    bestBitrate = bitrate
+                    bestUrl     = url
+                    bestMime    = mime
+                    durationMs  = fmt.optLong("approxDurationMs", 0L)
+                }
             }
         }
 
-        if (bestUrl.isEmpty()) throw Exception("No audio stream found for $videoId")
+        if (bestUrl.isBlank() && formats != null) {
+            for (i in 0 until formats.length()) {
+                val fmt = formats.getJSONObject(i)
+                val url = fmt.optString("url", "")
+                if (url.isBlank()) continue
+                bestUrl     = url
+                bestMime    = fmt.optString("mimeType", "")
+                bestBitrate = fmt.optInt("bitrate", 0)
+                durationMs  = fmt.optLong("approxDurationMs", 0L)
+                break
+            }
+        }
+
+        if (bestUrl.isBlank()) throw Exception("No direct-url stream for $videoId")
+
+        android.util.Log.d(
+            "InnerTubeClient",
+            "resolved url length=${bestUrl.length} mime=$bestMime"
+        )
 
         return StreamInfo(
-            videoId = videoId,
-            streamUrl = bestUrl,
-            mimeType = bestMime,
-            bitrate = bestBitrate,
+            videoId    = videoId,
+            streamUrl  = bestUrl,
+            mimeType   = bestMime,
+            bitrate    = bestBitrate,
             durationMs = durationMs
         )
     }
