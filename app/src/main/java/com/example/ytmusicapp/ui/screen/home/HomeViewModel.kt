@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.ytmusicapp.data.repository.HomeFeedRepository
 import com.example.ytmusicapp.data.repository.HomeSection
+import com.example.ytmusicapp.data.repository.RecommendationRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -15,19 +16,28 @@ import javax.inject.Inject
 
 data class HomeUiState(
     val sections: List<HomeSection> = emptyList(),
+    val fullFeedSections: List<HomeSection> = emptyList(), // always holds full feed
     val isLoading: Boolean = false,
-    val error: String? = null
+    val error: String? = null,
+    val selectedGenre: String = "all",
+    val availableGenres: List<String> = listOf("all")
 )
 
 @HiltViewModel
 class HomeViewModel @Inject constructor(
-    private val homeFeedRepository: HomeFeedRepository
+    private val homeFeedRepository: HomeFeedRepository,
+    private val recommendationRepository: RecommendationRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HomeUiState(isLoading = true))
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
 
-    init { observeFeed() }
+    init {
+        observeFeed()
+        loadAvailableGenres()
+    }
+
+    // ── Feed ──────────────────────────────────────────────────────────────────
 
     private fun observeFeed() {
         viewModelScope.launch {
@@ -36,27 +46,70 @@ class HomeViewModel @Inject constructor(
                     _uiState.update { it.copy(isLoading = false, error = e.message) }
                 }
                 .collect { sections ->
-                    _uiState.value = HomeUiState(sections = sections, isLoading = false)
+                    _uiState.update { state ->
+                        // Only replace visible sections if "all" is selected
+                        val visibleSections = if (state.selectedGenre == "all") sections else state.sections
+                        state.copy(
+                            fullFeedSections = sections,
+                            sections = visibleSections,
+                            isLoading = false
+                        )
+                    }
                 }
         }
     }
 
     fun refresh() {
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, error = null) }
+            _uiState.update { it.copy(isLoading = true, error = null, selectedGenre = "all") }
             homeFeedRepository.refresh()
+            loadAvailableGenres()
         }
     }
 
-    fun onSectionImpression(sectionId: String) {
+    // ── Genre chips ───────────────────────────────────────────────────────────
+
+    private fun loadAvailableGenres() {
         viewModelScope.launch {
-            homeFeedRepository.logImpression(sectionId)
+            val genres = recommendationRepository.getAvailableGenres()
+            _uiState.update { it.copy(availableGenres = listOf("all") + genres) }
         }
+    }
+
+    fun selectGenre(genre: String) {
+        if (genre == "all") {
+            // Restore full feed immediately — no network call needed
+            _uiState.update { state ->
+                state.copy(
+                    selectedGenre = "all",
+                    sections = state.fullFeedSections,
+                    isLoading = false,
+                    error = null
+                )
+            }
+            return
+        }
+
+        _uiState.update { it.copy(selectedGenre = genre, isLoading = true, error = null) }
+        viewModelScope.launch {
+            val shelf = homeFeedRepository.buildGenreShelf(genre)
+            _uiState.update { state ->
+                state.copy(
+                    sections  = listOfNotNull(shelf),
+                    isLoading = false,
+                    error     = if (shelf == null) "No $genre tracks found yet" else null
+                )
+            }
+        }
+    }
+
+    // ── Impression / click telemetry ──────────────────────────────────────────
+
+    fun onSectionImpression(sectionId: String) {
+        viewModelScope.launch { homeFeedRepository.logImpression(sectionId) }
     }
 
     fun onSectionClick(sectionId: String) {
-        viewModelScope.launch {
-            homeFeedRepository.logSectionClick(sectionId)
-        }
+        viewModelScope.launch { homeFeedRepository.logSectionClick(sectionId) }
     }
 }

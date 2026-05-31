@@ -24,6 +24,7 @@ data class RecommendationCandidateEntity(
     val durationMs: Long,
     val popularityScore: Float,
     val metadataTokens: String,
+    val thumbnailUrl: String = "",
     val isFavorite: Boolean = false,
     val isDownloaded: Boolean = false
 )

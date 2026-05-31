@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
+import com.example.ytmusicapp.data.repository.HomeFeedRepository
 import com.example.ytmusicapp.data.repository.QueueRepository
 import com.example.ytmusicapp.data.repository.RecommendationRepository
 import com.example.ytmusicapp.data.tracker.EventTracker
@@ -50,6 +51,7 @@ class PlayerViewModel @Inject constructor(
     private val generateQueueUseCase: GenerateQueueUseCase,
     private val queueRepository: QueueRepository,
     private val recommendationRepository: RecommendationRepository,
+    private val homeFeedRepository: HomeFeedRepository,
     private val eventTracker: EventTracker
 ) : ViewModel() {
 
@@ -179,9 +181,12 @@ class PlayerViewModel @Inject constructor(
                     isLoading  = false,
                     isPlaying  = true
                 )
+                // bulk ingest depth-2 then refresh feed
                 viewModelScope.launch {
-                    try { recommendationRepository.fetchAndIngestRelatedTracks(videoId) }
-                    catch (_: Exception) {}
+                    try {
+                        recommendationRepository.fetchAndIngestRelatedTracksBulk(videoId)
+                        homeFeedRepository.refresh()
+                    } catch (_: Exception) {}
                 }
                 if (_uiState.value.track != null && _uiState.value.queue.size <= 3) {
                     fetchAutoQueue()

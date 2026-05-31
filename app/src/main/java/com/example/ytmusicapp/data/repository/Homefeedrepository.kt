@@ -38,10 +38,25 @@ private const val BETA  = 0.35f
 private const val GAMMA = 0.20f
 private const val DELTA = 0.15f
 
+// Human-readable display names for each normalized genre key
+val GENRE_DISPLAY_NAMES: Map<String, String> = mapOf(
+    "phonk"      to "Phonk",
+    "lofi"       to "Lo-Fi",
+    "rap"        to "Rap",
+    "rnb"        to "R&B",
+    "electronic" to "Electronic",
+    "pop"        to "Pop",
+    "rock"       to "Rock",
+    "jazz"       to "Jazz",
+    "classical"  to "Classical",
+    "workout"    to "Workout"
+)
+
 data class HomeSection(
     val id: String,
     val title: String,
     val tracks: List<Track>,
+    val genre: String? = null,          // non-null for genre shelves
     val isEphemeral: Boolean = false
 )
 
@@ -61,13 +76,8 @@ class HomeFeedRepository @Inject constructor(
     private val mmrDiversifier: MMRDiversifier,
     private val epsilonGreedyAllocator: EpsilonGreedyAllocator
 ) {
-    // ── Refresh trigger ───────────────────────────────────────────────────────
     private val _refreshTrigger = MutableSharedFlow<Unit>(replay = 1)
 
-    /**
-     * Emits the full feed on subscribe, then re-emits on every refresh() call.
-     * HomeViewModel collects this flow.
-     */
     fun feedFlow(): Flow<List<HomeSection>> = flow {
         emit(buildFeed())
         _refreshTrigger.collect {
@@ -75,12 +85,10 @@ class HomeFeedRepository @Inject constructor(
         }
     }.flowOn(Dispatchers.IO)
 
-    /** Pull-to-refresh + WorkManager Tier 2 entry point. */
     suspend fun refresh() {
         _refreshTrigger.emit(Unit)
     }
 
-    /** Called by HomeViewModel when a shelf enters the viewport (>50% visible). */
     suspend fun logImpression(sectionId: String) {
         withContext(Dispatchers.IO) {
             shelfImpressionDao.insert(
@@ -94,7 +102,6 @@ class HomeFeedRepository @Inject constructor(
         }
     }
 
-    /** Called by HomeViewModel when user taps a track inside a shelf. */
     suspend fun logSectionClick(sectionId: String) {
         withContext(Dispatchers.IO) {
             shelfImpressionDao.insert(
@@ -173,6 +180,53 @@ class HomeFeedRepository @Inject constructor(
             android.util.Log.d("HomeFeed", "shelves built: ${allShelves.map { it.title }}")
             rankShelves(allShelves, tasteProfile, nowMs)
         }
+    }
+
+    /**
+     * Builds a genre-filtered shelf on demand.
+     * Called by HomeViewModel when user taps a genre chip.
+     * Returns null if no candidates match.
+     */
+    suspend fun buildGenreShelf(
+        genre: String,
+        nowMs: Long = System.currentTimeMillis()
+    ): HomeSection? = withContext(Dispatchers.IO) {
+        val candidates = candidateDao.getTopCandidates(CANDIDATE_FETCH_LIMIT)
+        val recentPlays = playEventDao.getRecent(200)
+        val recentSkips = skipEventDao.getSince(nowMs - MS_48H)
+        val artistMap   = candidates.associate { it.videoId to it.artistId }
+
+        val scoreMap = buildScoreMap(
+            candidates         = candidates,
+            recentPlays        = recentPlays,
+            recentSkips        = recentSkips.toList(),
+            artistMap          = artistMap,
+            recentSearchTokens = emptyList(),
+            nowMs              = nowMs
+        )
+
+        // Match stored genre OR scan metadataTokens for old rows where genre = ""
+        val keywords = GENRE_KEYWORDS[genre] ?: emptySet()
+        val genreCandidates = candidates
+            .filter { c ->
+                c.genre == genre ||
+                        (c.genre.isBlank() && keywords.any { kw -> c.metadataTokens.lowercase().contains(kw) })
+            }
+            .filter { suppressionDao.isSuppressed(it.videoId, nowMs) == 0 }
+            .map { it to (scoreMap[it.videoId] ?: it.popularityScore) }
+
+        if (genreCandidates.isEmpty()) return@withContext null
+
+        val diversified = mmrDiversifier.diversify(genreCandidates, SHELF_LIMIT)
+        if (diversified.isEmpty()) return@withContext null
+
+        val displayName = GENRE_DISPLAY_NAMES[genre] ?: genre.replaceFirstChar { it.uppercase() }
+        HomeSection(
+            id    = "genre_$genre",
+            title = displayName,
+            tracks = diversified.map { it.toTrack() },
+            genre  = genre
+        )
     }
 
     // ── 1. Continue Listening ─────────────────────────────────────────────────
@@ -478,7 +532,7 @@ class HomeFeedRepository @Inject constructor(
         title        = title,
         artist       = artistName,
         album        = albumName,
-        thumbnailUrl = "",
+        thumbnailUrl = thumbnailUrl.ifBlank { "https://i.ytimg.com/vi/$videoId/mqdefault.jpg" },
         durationMs   = durationMs,
         isDownloaded = false
     )

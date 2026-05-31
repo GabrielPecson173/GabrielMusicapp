@@ -25,10 +25,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.ytmusicapp.data.repository.GENRE_DISPLAY_NAMES
+import com.example.ytmusicapp.data.repository.HomeSection
 import com.example.ytmusicapp.data.tracker.EventTracker
 import com.example.ytmusicapp.ui.component.TrackListItem
 import com.example.ytmusicapp.ui.screen.player.PlayerViewModel
-import com.example.ytmusicapp.data.repository.HomeSection
 
 // ── Palette ──────────────────────────────────────────────────────────────────
 private val LimeGreen       = Color(0xFF84CC16)
@@ -40,14 +41,9 @@ private val Surface3        = Color(0xFF252525)
 private val TextPrimary     = Color(0xFFEFEFEF)
 private val TextSecondary   = Color(0xFF888888)
 
-private val GENRE_FILTER = mapOf(
-    "All"      to null,
-    "Trending" to "Trending for You",
-    "Phonk"    to "Workout Mix",
-    "Lo-fi"    to "Night Listening Mix",
-    "Rap"      to "Because You Played",
-    "R&B"      to "Similar to Favorites"
-)
+// Maps normalized genre key → display label for chips
+private fun genreLabel(genre: String): String =
+    if (genre == "all") "All" else GENRE_DISPLAY_NAMES[genre] ?: genre.replaceFirstChar { it.uppercase() }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -58,17 +54,7 @@ fun HomeScreen(
     eventTracker: EventTracker,
     viewModel: HomeViewModel = hiltViewModel()
 ) {
-    val uiState       by viewModel.uiState.collectAsStateWithLifecycle()
-    var selectedGenre by remember { mutableStateOf("All") }
-
-    val visibleSections = remember(uiState.sections, selectedGenre) {
-        if (selectedGenre == "All") {
-            uiState.sections
-        } else {
-            val target = GENRE_FILTER[selectedGenre]
-            uiState.sections.filter { it.title == target }
-        }
-    }
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
     Column(
         modifier = Modifier
@@ -152,22 +138,22 @@ fun HomeScreen(
             }
         }
 
-        // ── Genre Chips ──────────────────────────────────────────────────────
+        // ── Genre Chips — dynamic from VM ────────────────────────────────────
         LazyRow(
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            items(GENRE_FILTER.keys.toList()) { genre ->
-                val selected = genre == selectedGenre
+            items(uiState.availableGenres, key = { it }) { genre ->
+                val selected = genre == uiState.selectedGenre
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(20.dp))
                         .background(if (selected) LimeGreen else Surface2)
-                        .clickable { selectedGenre = genre }
+                        .clickable { viewModel.selectGenre(genre) }
                         .padding(horizontal = 14.dp, vertical = 6.dp)
                 ) {
                     Text(
-                        text = genre,
+                        text = genreLabel(genre),
                         fontSize = 12.sp,
                         fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
                         color = if (selected) Color.Black else TextSecondary
@@ -201,7 +187,7 @@ fun HomeScreen(
                 }
 
                 else -> FeedContent(
-                    sections = visibleSections,
+                    sections = uiState.sections,
                     eventTracker = eventTracker,
                     playerViewModel = playerViewModel,
                     onTrackClick = onTrackClick,
@@ -213,7 +199,7 @@ fun HomeScreen(
     }
 }
 
-// ── FeedContent — owns LazyListState + viewport impression tracking ──────────
+// ── FeedContent ───────────────────────────────────────────────────────────────
 @Composable
 private fun FeedContent(
     sections: List<HomeSection>,
@@ -225,16 +211,12 @@ private fun FeedContent(
 ) {
     val listState = rememberLazyListState()
 
-    // Build a flat index → sectionId map so we can map list items to shelves.
-    // Each section occupies: 1 header item + N track items.
     val indexToSectionId = remember(sections) {
         buildMap<Int, String> {
             var idx = 0
             sections.forEach { section ->
-                // header
                 put(idx, section.id)
                 idx++
-                // tracks
                 repeat(section.tracks.size) {
                     put(idx, section.id)
                     idx++
@@ -243,22 +225,19 @@ private fun FeedContent(
         }
     }
 
-    // Track which sectionIds have already been impressed this composition.
     val impressedSections = remember { mutableSetOf<String>() }
 
-    // derivedStateOf — recompute only when visible items change.
     val visibleSectionIds by remember {
         derivedStateOf {
-            val layoutInfo = listState.layoutInfo
+            val layoutInfo    = listState.layoutInfo
             val viewportStart = layoutInfo.viewportStartOffset
             val viewportEnd   = layoutInfo.viewportEndOffset
 
             layoutInfo.visibleItemsInfo
                 .filter { item ->
-                    // >50% of the item must be inside the viewport
-                    val itemStart  = item.offset
-                    val itemEnd    = item.offset + item.size
-                    val visible    = minOf(itemEnd, viewportEnd) - maxOf(itemStart, viewportStart)
+                    val itemStart = item.offset
+                    val itemEnd   = item.offset + item.size
+                    val visible   = minOf(itemEnd, viewportEnd) - maxOf(itemStart, viewportStart)
                     visible.toFloat() / item.size.toFloat() >= 0.50f
                 }
                 .mapNotNull { item -> indexToSectionId[item.index] }
@@ -266,7 +245,6 @@ private fun FeedContent(
         }
     }
 
-    // Fire impression once per section per session.
     LaunchedEffect(visibleSectionIds) {
         visibleSectionIds.forEach { sectionId ->
             if (impressedSections.add(sectionId)) {
@@ -282,7 +260,6 @@ private fun FeedContent(
         contentPadding = PaddingValues(bottom = 16.dp)
     ) {
         sections.forEach { section ->
-            // ── Section Header ────────────────────────────
             item(key = "header_${section.id}") {
                 Row(
                     modifier = Modifier
@@ -301,7 +278,6 @@ private fun FeedContent(
                 }
             }
 
-            // ── Tracks ────────────────────────────────────
             items(
                 items = section.tracks,
                 key   = { track -> "${section.id}_${track.id}" }

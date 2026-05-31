@@ -14,15 +14,15 @@ val Pink40 = Color(0xFF8B0000)
 val Orange80 = Color(0xFFFFAB76)
 val Orange40 = Color(0xFFE65100)
 
-// Neutral
-val DarkBackground = Color(0xFF0F0F0F)
-val DarkSurface = Color(0xFF1A1A1A)
-val DarkSurfaceVariant = Color(0xFF2C2C2C)
+// Neutral — AMOLED black base, tiny contrast steps
+val DarkBackground     = Color(0xFF000000) // true black
+val DarkSurface        = Color(0xFF0D0D0D) // barely off-black
+val DarkSurfaceVariant = Color(0xFF1A1A1A) // subtle lift for cards/sheets
 
-val LightBackground = Color(0xFFFFFBFE)
-val LightSurface = Color(0xFFFFFBFE)
+val LightBackground     = Color(0xFFFFFBFE)
+val LightSurface        = Color(0xFFFFFBFE)
 val LightSurfaceVariant = Color(0xFFE7E0EC)
 
 // On colors
-val OnDark = Color(0xFFFFFFFF)
+val OnDark  = Color(0xFFEEEEEE) // slightly off-white — tiny contrast relief
 val OnLight = Color(0xFF1C1B1F)

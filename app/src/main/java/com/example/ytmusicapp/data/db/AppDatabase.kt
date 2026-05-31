@@ -25,7 +25,7 @@ import com.example.ytmusicapp.data.db.entity.*
         SessionPairEntity::class,
         ShelfImpressionEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 @TypeConverters(VectorTypeConverter::class)
@@ -135,6 +135,14 @@ abstract class AppDatabase : RoomDatabase() {
                     impressionCount INTEGER NOT NULL DEFAULT 0)""")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_shelf_impressions_sectionId ON shelf_impressions(sectionId)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_shelf_impressions_timestamp ON shelf_impressions(timestamp)")
+            }
+        }
+
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE recommendation_candidates ADD COLUMN thumbnailUrl TEXT NOT NULL DEFAULT ''"
+                )
             }
         }
     }

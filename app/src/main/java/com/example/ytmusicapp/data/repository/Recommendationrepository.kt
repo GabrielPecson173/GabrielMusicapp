@@ -12,6 +12,9 @@ import com.example.ytmusicapp.data.db.entity.SkipEventEntity
 import com.example.ytmusicapp.data.db.entity.SuppressionEntity
 import com.example.ytmusicapp.domain.model.Track
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -19,6 +22,30 @@ import javax.inject.Singleton
 private const val CANDIDATE_CAP = 2_000
 private const val SUPPRESSION_14_DAYS_MS = 14L * 24 * 60 * 60 * 1000
 private const val SUPPRESSION_30_DAYS_MS = 30L * 24 * 60 * 60 * 1000
+
+// ── Genre keyword map ─────────────────────────────────────────────────────────
+// key = normalized genre label stored in DB
+// value = keywords found in title/artist/album tokens
+val GENRE_KEYWORDS: Map<String, Set<String>> = mapOf(
+    "phonk"     to setOf("phonk", "drift", "memphis", "slowed"),
+    "lofi"      to setOf("lofi", "lo-fi", "chillhop", "chill hop", "study", "beats to"),
+    "rap"       to setOf("rap", "hip hop", "hiphop", "trap", "drill", "freestyle", "bars", "verse", "flow"),
+    "rnb"       to setOf("r&b", "rnb", "soul", "neo soul", "groove", "smooth"),
+    "electronic" to setOf("edm", "electronic", "techno", "house", "trance", "dubstep", "bass", "synth"),
+    "pop"       to setOf("pop", "indie pop", "synth pop"),
+    "rock"      to setOf("rock", "metal", "punk", "grunge", "alternative", "indie rock"),
+    "jazz"      to setOf("jazz", "blues", "swing", "bebop"),
+    "classical" to setOf("classical", "orchestra", "symphony", "piano", "violin", "acoustic"),
+    "workout"   to setOf("workout", "gym", "cardio", "run", "hype", "energy", "pump")
+)
+
+private fun extractGenre(vararg fields: String): String {
+    val combined = fields.joinToString(" ").lowercase()
+    return GENRE_KEYWORDS.entries
+        .firstOrNull { (_, keywords) -> keywords.any { combined.contains(it) } }
+        ?.key
+        ?: ""
+}
 
 @Singleton
 class RecommendationRepository @Inject constructor(
@@ -59,7 +86,6 @@ class RecommendationRepository @Inject constructor(
     suspend fun fetchAndIngestRelatedTracks(videoId: String) =
         withContext(Dispatchers.IO) {
             val related = searchRepository.getRelatedTracks(videoId)
-            val nowMs = System.currentTimeMillis()
 
             val entities = related.mapNotNull { track ->
                 if (isSuppressed(track.id)) return@mapNotNull null
@@ -67,6 +93,34 @@ class RecommendationRepository @Inject constructor(
             }
 
             candidateDao.insertAll(entities)
+            pruneToCapIfNeeded()
+        }
+
+    suspend fun fetchAndIngestRelatedTracksBulk(videoId: String) =
+        withContext(Dispatchers.IO) {
+            val related = searchRepository.getRelatedTracks(videoId)
+
+            val seedEntities = related.mapNotNull { track ->
+                if (isSuppressed(track.id)) return@mapNotNull null
+                track.toCandidateEntity()
+            }
+            candidateDao.insertAll(seedEntities)
+
+            coroutineScope {
+                related.take(5).map { track ->
+                    async {
+                        try {
+                            val deeper = searchRepository.getRelatedTracks(track.id)
+                            val entities = deeper.mapNotNull { t ->
+                                if (isSuppressed(t.id)) return@mapNotNull null
+                                t.toCandidateEntity()
+                            }
+                            candidateDao.insertAll(entities)
+                        } catch (_: Exception) {}
+                    }
+                }.awaitAll()
+            }
+
             pruneToCapIfNeeded()
         }
 
@@ -134,6 +188,38 @@ class RecommendationRepository @Inject constructor(
             suppressionDao.isSuppressed(videoId, System.currentTimeMillis()) > 0
         }
 
+    // ── Dynamic genre chips ───────────────────────────────────────────────────
+
+    /**
+     * Returns genres the user actually has tracks for, ranked by play affinity.
+     * HomeViewModel exposes this to HomeScreen for dynamic chips.
+     */
+    suspend fun getAvailableGenres(): List<String> = withContext(Dispatchers.IO) {
+        val recentPlays = playEventDao.getRecent(500)
+        val playedIds   = recentPlays.map { it.videoId }.toSet()
+
+        // Score genres by how many played tracks belong to each
+        val genrePlayCount = mutableMapOf<String, Int>()
+        playedIds.forEach { vid ->
+            val genre = candidateDao.getByVideoId(vid)?.genre
+            if (!genre.isNullOrBlank()) {
+                genrePlayCount[genre] = (genrePlayCount[genre] ?: 0) + 1
+            }
+        }
+
+        // Also include genres present in DB even if not played yet (at least 3 tracks)
+        candidateDao.getTopCandidates(CANDIDATE_CAP)
+            .groupBy { it.genre }
+            .filter { (genre, tracks) -> genre.isNotBlank() && tracks.size >= 3 }
+            .forEach { (genre, _) ->
+                if (!genrePlayCount.containsKey(genre)) genrePlayCount[genre] = 0
+            }
+
+        genrePlayCount.entries
+            .sortedByDescending { it.value }
+            .map { it.key }
+    }
+
     // ── Session co-occurrence pairs ───────────────────────────────────────────
 
     suspend fun logSessionPair(videoIdA: String, videoIdB: String, weight: Float) =
@@ -177,17 +263,18 @@ class RecommendationRepository @Inject constructor(
     // ── Mappers ───────────────────────────────────────────────────────────────
 
     private fun Track.toCandidateEntity() = RecommendationCandidateEntity(
-        videoId = id,
-        title = title,
-        artistId = artist,
-        artistName = artist,
-        albumId = album,
-        albumName = album,
-        genre = "",
-        durationMs = durationMs,
+        videoId        = id,
+        title          = title,
+        artistId       = artist,
+        artistName     = artist,
+        albumId        = album,
+        albumName      = album,
+        genre          = extractGenre(title, artist, album),
+        durationMs     = durationMs,
         popularityScore = 0f,
         metadataTokens = tokenize(title, artist, album),
-        isFavorite = false
+        thumbnailUrl   = thumbnailUrl,
+        isFavorite     = false
     )
 
     private fun tokenize(vararg fields: String): String =
