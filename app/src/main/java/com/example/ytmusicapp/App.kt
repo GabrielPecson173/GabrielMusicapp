@@ -3,26 +3,20 @@ package com.example.ytmusicapp
 import android.app.Application
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
-import androidx.work.Constraints
-import androidx.work.ExistingPeriodicWorkPolicy
-import androidx.work.NetworkType
-import androidx.work.PeriodicWorkRequestBuilder
-import androidx.work.WorkManager
-import com.example.ytmusicapp.worker.DatabaseCleanupWorker
+import com.example.ytmusicapp.worker.WorkerScheduler
 import dagger.hilt.android.HiltAndroidApp
+import okhttp3.OkHttpClient
 import org.schabi.newpipe.extractor.NewPipe
 import org.schabi.newpipe.extractor.downloader.Downloader
 import org.schabi.newpipe.extractor.downloader.Request
 import org.schabi.newpipe.extractor.downloader.Response
-import okhttp3.OkHttpClient
-import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 
 @HiltAndroidApp
 class App : Application(), Configuration.Provider {
 
-    @Inject
-    lateinit var workerFactory: HiltWorkerFactory
+    @Inject lateinit var workerFactory: HiltWorkerFactory
+    @Inject lateinit var workerScheduler: WorkerScheduler
 
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder()
@@ -32,7 +26,7 @@ class App : Application(), Configuration.Provider {
     override fun onCreate() {
         super.onCreate()
         initNewPipe()
-        scheduleCleanup()
+        workerScheduler.scheduleAll()
     }
 
     private fun initNewPipe() {
@@ -63,24 +57,5 @@ class App : Application(), Configuration.Provider {
                 )
             }
         })
-    }
-
-    private fun scheduleCleanup() {
-        val constraints = Constraints.Builder()
-            .setRequiresCharging(true)
-            .setRequiredNetworkType(NetworkType.UNMETERED)
-            .build()
-
-        val request = PeriodicWorkRequestBuilder<DatabaseCleanupWorker>(
-            1, TimeUnit.DAYS
-        )
-            .setConstraints(constraints)
-            .build()
-
-        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
-            "db_cleanup",
-            ExistingPeriodicWorkPolicy.KEEP,
-            request
-        )
     }
 }

@@ -2,22 +2,16 @@ package com.example.ytmusicapp.ui.screen.home
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.ytmusicapp.data.repository.QueueRepository
-import com.example.ytmusicapp.domain.model.Track
-import com.example.ytmusicapp.domain.usecase.SearchMusicUseCase
+import com.example.ytmusicapp.data.repository.HomeFeedRepository
+import com.example.ytmusicapp.data.repository.HomeSection
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
-
-data class HomeSection(
-    val title: String,
-    val tracks: List<Track>
-)
 
 data class HomeUiState(
     val sections: List<HomeSection> = emptyList(),
@@ -25,47 +19,44 @@ data class HomeUiState(
     val error: String? = null
 )
 
-private val SECTIONS = listOf(
-    "Trending Now"  to listOf("trending music 2025", "viral songs 2025", "hot songs this week"),
-    "Fresh Drops"   to listOf("new music releases 2025", "best new artists 2025", "new singles this week"),
-    "Viral Hits"    to listOf("tiktok songs 2025", "popular hits now", "music hits today"),
-    "Late Night"    to listOf("late night vibes music", "chill r&b 2025", "slow songs 2025"),
-    "High Energy"   to listOf("gym music 2025", "phonk music 2025", "high bpm workout music"),
-)
-
 @HiltViewModel
 class HomeViewModel @Inject constructor(
-    private val searchMusicUseCase: SearchMusicUseCase,
-    private val queueRepository: QueueRepository
+    private val homeFeedRepository: HomeFeedRepository
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(HomeUiState())
+    private val _uiState = MutableStateFlow(HomeUiState(isLoading = true))
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
 
-    init { loadSections() }
+    init { observeFeed() }
 
-    private fun loadSections() {
+    private fun observeFeed() {
         viewModelScope.launch {
-            _uiState.value = HomeUiState(isLoading = true)
-            try {
-                val fetched = SECTIONS.map { (title, queries) ->
-                    async {
-                        val query = queries.random()
-                        val tracks = searchMusicUseCase(query).shuffled().take(10)
-                        HomeSection(title, tracks)
-                    }
-                }.awaitAll()
-                    .filter { it.tracks.isNotEmpty() }
-
-                _uiState.value = HomeUiState(sections = fetched)
-
-                val allTracks = fetched.flatMap { it.tracks }
-                queueRepository.saveTracksToLibrary(allTracks)
-            } catch (e: Exception) {
-                _uiState.value = HomeUiState(error = e.message)
-            }
+            homeFeedRepository.feedFlow()
+                .catch { e ->
+                    _uiState.update { it.copy(isLoading = false, error = e.message) }
+                }
+                .collect { sections ->
+                    _uiState.value = HomeUiState(sections = sections, isLoading = false)
+                }
         }
     }
 
-    fun refresh() = loadSections()
+    fun refresh() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true, error = null) }
+            homeFeedRepository.refresh()
+        }
+    }
+
+    fun onSectionImpression(sectionId: String) {
+        viewModelScope.launch {
+            homeFeedRepository.logImpression(sectionId)
+        }
+    }
+
+    fun onSectionClick(sectionId: String) {
+        viewModelScope.launch {
+            homeFeedRepository.logSectionClick(sectionId)
+        }
+    }
 }

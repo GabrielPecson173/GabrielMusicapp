@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -13,11 +14,7 @@ import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -28,9 +25,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.ytmusicapp.data.tracker.EventTracker
 import com.example.ytmusicapp.ui.component.TrackListItem
 import com.example.ytmusicapp.ui.screen.player.PlayerViewModel
+import com.example.ytmusicapp.data.repository.HomeSection
 
+// ── Palette ──────────────────────────────────────────────────────────────────
 private val LimeGreen       = Color(0xFF84CC16)
 private val LimeGreenBright = Color(0xFFBEF264)
 private val LimeGreenMid    = Color(0xFF4D7C0F)
@@ -40,13 +40,13 @@ private val Surface3        = Color(0xFF252525)
 private val TextPrimary     = Color(0xFFEFEFEF)
 private val TextSecondary   = Color(0xFF888888)
 
-private val GENRE_SECTIONS = mapOf(
+private val GENRE_FILTER = mapOf(
     "All"      to null,
-    "Trending" to "Trending Now",
-    "Phonk"    to "High Energy",
-    "Lo-fi"    to "Late Night",
-    "Rap"      to "Viral Hits",
-    "R&B"      to "Late Night"
+    "Trending" to "Trending for You",
+    "Phonk"    to "Workout Mix",
+    "Lo-fi"    to "Night Listening Mix",
+    "Rap"      to "Because You Played",
+    "R&B"      to "Similar to Favorites"
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -55,16 +55,19 @@ fun HomeScreen(
     onTrackClick: (String) -> Unit,
     onSearchClick: () -> Unit,
     playerViewModel: PlayerViewModel,
+    eventTracker: EventTracker,
     viewModel: HomeViewModel = hiltViewModel()
 ) {
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val uiState       by viewModel.uiState.collectAsStateWithLifecycle()
     var selectedGenre by remember { mutableStateOf("All") }
 
-    val visibleSections = if (selectedGenre == "All") {
-        uiState.sections
-    } else {
-        val targetTitle = GENRE_SECTIONS[selectedGenre]
-        uiState.sections.filter { it.title == targetTitle }
+    val visibleSections = remember(uiState.sections, selectedGenre) {
+        if (selectedGenre == "All") {
+            uiState.sections
+        } else {
+            val target = GENRE_FILTER[selectedGenre]
+            uiState.sections.filter { it.title == target }
+        }
     }
 
     Column(
@@ -72,7 +75,7 @@ fun HomeScreen(
             .fillMaxSize()
             .background(DarkBg)
     ) {
-        // ── Top Bar ──────────────────────────────────────
+        // ── Top Bar ──────────────────────────────────────────────────────────
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -82,21 +85,40 @@ fun HomeScreen(
             Column(modifier = Modifier.weight(1f)) {
                 Text(text = "Good evening", fontSize = 12.sp, color = TextSecondary)
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Gabriel ", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                    Text("Pecson", fontSize = 22.sp, fontWeight = FontWeight.Bold, fontStyle = FontStyle.Italic, color = LimeGreen)
+                    Text(
+                        "Gabriel ",
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary
+                    )
+                    Text(
+                        "Pecson",
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontStyle = FontStyle.Italic,
+                        color = LimeGreen
+                    )
                 }
             }
-            Icon(Icons.Default.Notifications, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(22.dp))
+            Icon(
+                Icons.Default.Notifications,
+                contentDescription = null,
+                tint = TextSecondary,
+                modifier = Modifier.size(22.dp)
+            )
             Spacer(modifier = Modifier.width(12.dp))
             Box(
-                modifier = Modifier.size(36.dp).clip(CircleShape).background(LimeGreenMid),
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(LimeGreenMid),
                 contentAlignment = Alignment.Center
             ) {
-                Text("AK", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = LimeGreenBright)
+                Text("GP", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = LimeGreenBright)
             }
         }
 
-        // ── Search Bar — tappable, navigates to Search tab ──
+        // ── Search Bar ───────────────────────────────────────────────────────
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -107,9 +129,19 @@ fun HomeScreen(
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(Icons.Default.Search, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(18.dp))
+            Icon(
+                Icons.Default.Search,
+                contentDescription = null,
+                tint = TextSecondary,
+                modifier = Modifier.size(18.dp)
+            )
             Spacer(modifier = Modifier.width(8.dp))
-            Text("Artists, songs, podcasts...", color = TextSecondary, fontSize = 13.sp, modifier = Modifier.weight(1f))
+            Text(
+                "Artists, songs, podcasts...",
+                color = TextSecondary,
+                fontSize = 13.sp,
+                modifier = Modifier.weight(1f)
+            )
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(8.dp))
@@ -120,12 +152,12 @@ fun HomeScreen(
             }
         }
 
-        // ── Genre Chips — clickable, filter sections ─────
+        // ── Genre Chips ──────────────────────────────────────────────────────
         LazyRow(
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            items(GENRE_SECTIONS.keys.toList()) { genre ->
+            items(GENRE_FILTER.keys.toList()) { genre ->
                 val selected = genre == selectedGenre
                 Box(
                     modifier = Modifier
@@ -144,7 +176,7 @@ fun HomeScreen(
             }
         }
 
-        // ── Track List ───────────────────────────────────
+        // ── Feed ─────────────────────────────────────────────────────────────
         PullToRefreshBox(
             isRefreshing = uiState.isLoading,
             onRefresh = { viewModel.refresh() },
@@ -152,46 +184,140 @@ fun HomeScreen(
         ) {
             when {
                 uiState.isLoading -> Box(Modifier.fillMaxSize()) {
-                    CircularProgressIndicator(modifier = Modifier.align(Alignment.Center), color = LimeGreen)
+                    CircularProgressIndicator(
+                        modifier = Modifier.align(Alignment.Center),
+                        color = LimeGreen
+                    )
                 }
+
                 uiState.error != null -> Box(Modifier.fillMaxSize()) {
                     Text(
                         text = uiState.error!!,
                         color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.align(Alignment.Center).padding(16.dp)
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .padding(16.dp)
                     )
                 }
-                else -> LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(bottom = 16.dp)
-                ) {
-                    visibleSections.forEach { section ->
-                        item {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 8.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(section.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = TextPrimary)
-                                Text("See all →", fontSize = 12.sp, color = LimeGreen)
-                            }
-                        }
-                        items(section.tracks) { track ->
-                            TrackListItem(
-                                track = track,
-                                onClick = {
-                                    playerViewModel.setTrack(track)
-                                    playerViewModel.setQueue(listOf(track), 0)  // ← only seed track
-                                    onTrackClick(track.id)
-                                },
-                                onDownloadClick = {},
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
-                    }
+
+                else -> FeedContent(
+                    sections = visibleSections,
+                    eventTracker = eventTracker,
+                    playerViewModel = playerViewModel,
+                    onTrackClick = onTrackClick,
+                    onSectionImpression = viewModel::onSectionImpression,
+                    onSectionClick = viewModel::onSectionClick
+                )
+            }
+        }
+    }
+}
+
+// ── FeedContent — owns LazyListState + viewport impression tracking ──────────
+@Composable
+private fun FeedContent(
+    sections: List<HomeSection>,
+    eventTracker: EventTracker,
+    playerViewModel: PlayerViewModel,
+    onTrackClick: (String) -> Unit,
+    onSectionImpression: (String) -> Unit,
+    onSectionClick: (String) -> Unit
+) {
+    val listState = rememberLazyListState()
+
+    // Build a flat index → sectionId map so we can map list items to shelves.
+    // Each section occupies: 1 header item + N track items.
+    val indexToSectionId = remember(sections) {
+        buildMap<Int, String> {
+            var idx = 0
+            sections.forEach { section ->
+                // header
+                put(idx, section.id)
+                idx++
+                // tracks
+                repeat(section.tracks.size) {
+                    put(idx, section.id)
+                    idx++
                 }
+            }
+        }
+    }
+
+    // Track which sectionIds have already been impressed this composition.
+    val impressedSections = remember { mutableSetOf<String>() }
+
+    // derivedStateOf — recompute only when visible items change.
+    val visibleSectionIds by remember {
+        derivedStateOf {
+            val layoutInfo = listState.layoutInfo
+            val viewportStart = layoutInfo.viewportStartOffset
+            val viewportEnd   = layoutInfo.viewportEndOffset
+
+            layoutInfo.visibleItemsInfo
+                .filter { item ->
+                    // >50% of the item must be inside the viewport
+                    val itemStart  = item.offset
+                    val itemEnd    = item.offset + item.size
+                    val visible    = minOf(itemEnd, viewportEnd) - maxOf(itemStart, viewportStart)
+                    visible.toFloat() / item.size.toFloat() >= 0.50f
+                }
+                .mapNotNull { item -> indexToSectionId[item.index] }
+                .toSet()
+        }
+    }
+
+    // Fire impression once per section per session.
+    LaunchedEffect(visibleSectionIds) {
+        visibleSectionIds.forEach { sectionId ->
+            if (impressedSections.add(sectionId)) {
+                eventTracker.logImpression(sectionId)
+                onSectionImpression(sectionId)
+            }
+        }
+    }
+
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(bottom = 16.dp)
+    ) {
+        sections.forEach { section ->
+            // ── Section Header ────────────────────────────
+            item(key = "header_${section.id}") {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        section.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary
+                    )
+                    Text("See all →", fontSize = 12.sp, color = LimeGreen)
+                }
+            }
+
+            // ── Tracks ────────────────────────────────────
+            items(
+                items = section.tracks,
+                key   = { track -> "${section.id}_${track.id}" }
+            ) { track ->
+                TrackListItem(
+                    track = track,
+                    onClick = {
+                        eventTracker.logSectionClick(section.id)
+                        onSectionClick(section.id)
+                        playerViewModel.setTrack(track)
+                        playerViewModel.setQueue(listOf(track), 0)
+                        onTrackClick(track.id)
+                    },
+                    onDownloadClick = {},
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
         }
     }

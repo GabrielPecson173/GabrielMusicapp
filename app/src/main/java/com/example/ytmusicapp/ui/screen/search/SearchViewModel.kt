@@ -2,6 +2,7 @@ package com.example.ytmusicapp.ui.screen.search
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.ytmusicapp.data.tracker.EventTracker
 import com.example.ytmusicapp.domain.model.Track
 import com.example.ytmusicapp.domain.usecase.SearchMusicUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -25,7 +26,8 @@ data class SearchUiState(
 @OptIn(FlowPreview::class)
 @HiltViewModel
 class SearchViewModel @Inject constructor(
-    private val searchMusicUseCase: SearchMusicUseCase
+    private val searchMusicUseCase: SearchMusicUseCase,
+    private val eventTracker: EventTracker
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SearchUiState())
@@ -51,6 +53,13 @@ class SearchViewModel @Inject constructor(
     fun clearQuery() {
         _uiState.value = SearchUiState()
         _queryFlow.value = ""
+    }
+
+    fun onTrackClick(track: Track) {
+        eventTracker.logSearch(
+            query = _uiState.value.query,
+            clickedVideoId = track.id
+        )
     }
 
     private fun search(query: String) {

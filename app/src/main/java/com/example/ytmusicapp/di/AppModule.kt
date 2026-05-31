@@ -20,6 +20,8 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
 @InstallIn(SingletonComponent::class)
 object AppModule {
 
+    // ── Database ──────────────────────────────────────────────────────────────
+
     @Provides
     @Singleton
     fun provideDatabase(
@@ -29,8 +31,10 @@ object AppModule {
         AppDatabase::class.java,
         "ytmusic.db"
     )
-        .addMigrations(AppDatabase.MIGRATION_1_2)
+        .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3)
         .build()
+
+    // ── Core DAOs ─────────────────────────────────────────────────────────────
 
     @Provides
     @Singleton
@@ -47,6 +51,46 @@ object AppModule {
     @Provides
     @Singleton
     fun provideQueueDao(db: AppDatabase) = db.queueDao()
+
+    // ── Recommendation DAOs ───────────────────────────────────────────────────
+
+    @Provides
+    @Singleton
+    fun providePlayEventDao(db: AppDatabase) = db.playEventDao()
+
+    @Provides
+    @Singleton
+    fun provideSkipEventDao(db: AppDatabase) = db.skipEventDao()
+
+    @Provides
+    @Singleton
+    fun provideSearchEventDao(db: AppDatabase) = db.searchEventDao()
+
+    @Provides
+    @Singleton
+    fun provideRecommendationCandidateDao(db: AppDatabase) = db.recommendationCandidateDao()
+
+    @Provides
+    @Singleton
+    fun provideHomeFeedSectionDao(db: AppDatabase) = db.homeFeedSectionDao()
+
+    @Provides
+    @Singleton
+    fun provideTrackEmbeddingDao(db: AppDatabase) = db.trackEmbeddingDao()
+
+    @Provides
+    @Singleton
+    fun provideSuppressionDao(db: AppDatabase) = db.suppressionDao()
+
+    @Provides
+    @Singleton
+    fun provideSessionPairDao(db: AppDatabase) = db.sessionPairDao()
+
+    @Provides
+    @Singleton
+    fun provideShelfImpressionDao(db: AppDatabase) = db.shelfImpressionDao()
+
+    // ── Other ─────────────────────────────────────────────────────────────────
 
     @Provides
     @Singleton

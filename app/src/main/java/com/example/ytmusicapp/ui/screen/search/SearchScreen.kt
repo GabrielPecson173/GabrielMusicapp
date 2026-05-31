@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.ytmusicapp.data.tracker.EventTracker
 import com.example.ytmusicapp.ui.component.TrackListItem
 import com.example.ytmusicapp.ui.screen.player.PlayerViewModel
 
@@ -33,6 +34,7 @@ import com.example.ytmusicapp.ui.screen.player.PlayerViewModel
 fun SearchScreen(
     onTrackClick: (String) -> Unit,
     playerViewModel: PlayerViewModel,
+    eventTracker: EventTracker,
     viewModel: SearchViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -97,6 +99,7 @@ fun SearchScreen(
                             TrackListItem(
                                 track = track,
                                 onClick = {
+                                    viewModel.onTrackClick(track)
                                     playerViewModel.setTrack(track)
                                     playerViewModel.setQueue(listOf(track), 0)
                                     onTrackClick(track.id)
