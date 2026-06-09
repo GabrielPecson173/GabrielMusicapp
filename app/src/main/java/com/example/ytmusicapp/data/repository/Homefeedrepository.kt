@@ -7,7 +7,6 @@ import com.example.ytmusicapp.data.db.dao.SkipEventDao
 import com.example.ytmusicapp.data.db.dao.SuppressionDao
 import com.example.ytmusicapp.data.db.entity.RecommendationCandidateEntity
 import com.example.ytmusicapp.data.db.entity.ShelfImpressionEntity
-import com.example.ytmusicapp.domain.engine.CandidateLifecycleManager
 import com.example.ytmusicapp.domain.engine.EpsilonGreedyAllocator
 import com.example.ytmusicapp.domain.engine.MMRDiversifier
 import com.example.ytmusicapp.domain.engine.TasteProfileEngine
@@ -30,18 +29,15 @@ private const val SHELF_LIMIT           = 15
 private const val CANDIDATE_FETCH_LIMIT = 200
 private const val MS_24H                = 86_400_000L
 private const val MS_48H                = 172_800_000L
-private const val MS_7D                 = 604_800_000L
-private const val MS_45D               = 3_888_000_000L
 
 private const val ALPHA = 0.30f
 private const val BETA  = 0.35f
 private const val GAMMA = 0.20f
 private const val DELTA = 0.15f
 
-// Human-readable display names for each normalized genre key
 val GENRE_DISPLAY_NAMES: Map<String, String> = mapOf(
     "phonk"      to "Phonk",
-    "lofi"       to "Lo-Fi",
+    "lo-fi"      to "Lo-Fi",
     "rap"        to "Rap",
     "rnb"        to "R&B",
     "electronic" to "Electronic",
@@ -56,7 +52,7 @@ data class HomeSection(
     val id: String,
     val title: String,
     val tracks: List<Track>,
-    val genre: String? = null,          // non-null for genre shelves
+    val genre: String? = null,
     val isEphemeral: Boolean = false
 )
 
@@ -67,21 +63,32 @@ class HomeFeedRepository @Inject constructor(
     private val candidateDao: RecommendationCandidateDao,
     private val suppressionDao: SuppressionDao,
     private val shelfImpressionDao: ShelfImpressionDao,
-    private val searchRepository: SearchRepository,
     private val recommendationRepository: RecommendationRepository,
     private val scoringEngine: TrackScoringEngine,
     private val tasteProfileEngine: TasteProfileEngine,
     private val tfIdfEngine: TfIdfEngine,
-    private val lifecycleManager: CandidateLifecycleManager,
     private val mmrDiversifier: MMRDiversifier,
     private val epsilonGreedyAllocator: EpsilonGreedyAllocator
 ) {
+    // ── Phase A: in-memory stale-while-revalidate cache ───────────────────────
+
+    @Volatile private var cachedFeed: List<HomeSection>? = null
+
     private val _refreshTrigger = MutableSharedFlow<Unit>(replay = 1)
 
     fun feedFlow(): Flow<List<HomeSection>> = flow {
-        emit(buildFeed())
+        cachedFeed?.let { emit(it) }
+
+        if (cachedFeed == null) {
+            val initial = buildFeed()
+            cachedFeed = initial
+            emit(initial)
+        }
+
         _refreshTrigger.collect {
-            emit(buildFeed())
+            val fresh = buildFeed()
+            cachedFeed = fresh
+            emit(fresh)
         }
     }.flowOn(Dispatchers.IO)
 
@@ -153,14 +160,14 @@ class HomeFeedRepository @Inject constructor(
         )
 
         coroutineScope {
-            val continueListening  = async { shelfContinueListening(nowMs) }
-            val recentlyPlayed     = async { shelfRecentlyPlayed(nowMs) }
+            val continueListening  = async { shelfContinueListening() }
+            val recentlyPlayed     = async { shelfRecentlyPlayed() }
             val becauseYouPlayed   = async { shelfBecauseYouPlayed(candidates, scoreMap, nowMs) }
             val similarToFavorites = async { shelfSimilarToFavorites(favorites, candidates, scoreMap) }
-            val trendingForYou     = async { shelfTrendingForYou(candidates, tasteProfile, scoreMap) }
-            val rediscover         = async { shelfRediscover(nowMs) }
+            val trendingForYou     = async { shelfTrendingForYou(candidates, tasteProfile, scoreMap, nowMs) }
+            val rediscover         = async { shelfRediscover() }
             val newArtists         = async { shelfNewArtists(candidates, tasteProfile, scoreMap) }
-            val recommendedAlbums  = async { shelfRecommendedAlbums(tasteProfile) }
+            val recommendedAlbums  = async { shelfRecommendedAlbums(candidates, tasteProfile, scoreMap) }
             val nightMix           = async { shelfNightMix(candidates, scoreMap, nowHour) }
             val workoutMix         = async { shelfWorkoutMix(candidates, scoreMap) }
 
@@ -182,16 +189,11 @@ class HomeFeedRepository @Inject constructor(
         }
     }
 
-    /**
-     * Builds a genre-filtered shelf on demand.
-     * Called by HomeViewModel when user taps a genre chip.
-     * Returns null if no candidates match.
-     */
     suspend fun buildGenreShelf(
         genre: String,
         nowMs: Long = System.currentTimeMillis()
     ): HomeSection? = withContext(Dispatchers.IO) {
-        val candidates = candidateDao.getTopCandidates(CANDIDATE_FETCH_LIMIT)
+        val candidates  = candidateDao.getTopCandidates(CANDIDATE_FETCH_LIMIT)
         val recentPlays = playEventDao.getRecent(200)
         val recentSkips = skipEventDao.getSince(nowMs - MS_48H)
         val artistMap   = candidates.associate { it.videoId to it.artistId }
@@ -205,7 +207,6 @@ class HomeFeedRepository @Inject constructor(
             nowMs              = nowMs
         )
 
-        // Match stored genre OR scan metadataTokens for old rows where genre = ""
         val keywords = GENRE_KEYWORDS[genre] ?: emptySet()
         val genreCandidates = candidates
             .filter { c ->
@@ -220,10 +221,10 @@ class HomeFeedRepository @Inject constructor(
         val diversified = mmrDiversifier.diversify(genreCandidates, SHELF_LIMIT)
         if (diversified.isEmpty()) return@withContext null
 
-        val displayName = GENRE_DISPLAY_NAMES[genre] ?: genre.replaceFirstChar { it.uppercase() }
+        val displayName = GENRE_DISPLAY_NAMES[genre] ?: genre.replaceFirstChar { c -> c.uppercase() }
         HomeSection(
-            id    = "genre_$genre",
-            title = displayName,
+            id     = "genre_$genre",
+            title  = displayName,
             tracks = diversified.map { it.toTrack() },
             genre  = genre
         )
@@ -231,20 +232,21 @@ class HomeFeedRepository @Inject constructor(
 
     // ── 1. Continue Listening ─────────────────────────────────────────────────
 
-    private suspend fun shelfContinueListening(nowMs: Long): HomeSection? {
+    private suspend fun shelfContinueListening(): HomeSection? {
         val partial = playEventDao.getPartiallyPlayed(10)
         if (partial.isEmpty()) return null
         val tracks = partial.mapNotNull { event ->
             candidateDao.getByVideoId(event.videoId)?.toTrack()
         }
-        return HomeSection("continue_listening", "Continue Listening", tracks)
+        return if (tracks.isEmpty()) null
+        else HomeSection("continue_listening", "Continue Listening", tracks)
     }
 
     // ── 2. Recently Played ────────────────────────────────────────────────────
 
-    private suspend fun shelfRecentlyPlayed(nowMs: Long): HomeSection? {
+    private suspend fun shelfRecentlyPlayed(): HomeSection? {
         val recent = playEventDao.getRecent(20)
-        val seen = mutableSetOf<String>()
+        val seen   = mutableSetOf<String>()
         val tracks = recent.mapNotNull { event ->
             if (!seen.add(event.videoId)) return@mapNotNull null
             candidateDao.getByVideoId(event.videoId)?.toTrack()
@@ -263,21 +265,19 @@ class HomeFeedRepository @Inject constructor(
         val seedEvent     = playEventDao.getRecent(1).firstOrNull() ?: return null
         val seedCandidate = candidateDao.getByVideoId(seedEvent.videoId) ?: return null
 
-        val related = try {
-            searchRepository.getRelatedTracks(seedEvent.videoId)
-        } catch (_: Exception) { emptyList() }
-
-        related.forEach { track ->
-            recommendationRepository.fetchAndIngestRelatedTracks(track.id)
-        }
-
         val pairs     = recommendationRepository.getSessionPairs(seedEvent.videoId)
         val pairedIds = pairs.map {
             if (it.videoIdA == seedEvent.videoId) it.videoIdB else it.videoIdA
         }.toSet()
 
+        val artistId = seedCandidate.artistId
+        val artistCandidates = candidates
+            .filter { it.artistId == artistId && it.videoId != seedEvent.videoId }
+            .map { it.videoId }
+            .toSet()
+
         val scored = candidates
-            .filter { it.videoId in pairedIds || related.any { r -> r.id == it.videoId } }
+            .filter { it.videoId in pairedIds || it.videoId in artistCandidates }
             .filter { suppressionDao.isSuppressed(it.videoId, nowMs) == 0 }
             .map { it to (scoreMap[it.videoId] ?: 0f) }
 
@@ -321,40 +321,41 @@ class HomeFeedRepository @Inject constructor(
     private suspend fun shelfTrendingForYou(
         candidates: List<RecommendationCandidateEntity>,
         tasteProfile: TasteProfileEngine.TasteProfile,
-        scoreMap: Map<String, Float>
+        scoreMap: Map<String, Float>,
+        nowMs: Long
     ): HomeSection? {
-        val trendingQuery = if (tasteProfile.topGenres.isNotEmpty())
-            "trending ${tasteProfile.topGenres.first()} music"
-        else "trending music"
+        val topGenre = tasteProfile.topGenres.firstOrNull()
 
-        val results = try {
-            searchRepository.search(trendingQuery)
-        } catch (_: Exception) { emptyList() }
+        val filtered = if (topGenre != null) {
+            candidates.filter { it.genre == topGenre }
+        } else {
+            candidates
+        }
 
-        val reRanked = results.map { track ->
-            val candidate = candidates.find { it.videoId == track.id }
-            val score = candidate?.let { scoreMap[it.videoId] } ?: 0f
-            track to score
-        }.sortedByDescending { it.second }
+        val scored = filtered
+            .filter { suppressionDao.isSuppressed(it.videoId, nowMs) == 0 }
+            .map { it to (scoreMap[it.videoId] ?: it.popularityScore) }
+            .sortedByDescending { it.second }
             .take(SHELF_LIMIT)
-            .map { it.first }
 
-        return if (reRanked.isEmpty()) null
-        else HomeSection("trending_for_you", "Trending for You", reRanked)
+        if (scored.isEmpty()) return null
+
+        return HomeSection(
+            id     = "trending_for_you",
+            title  = "Trending for You",
+            tracks = scored.map { it.first.toTrack() }
+        )
     }
 
     // ── 6. Rediscover Favorites ───────────────────────────────────────────────
 
-    private suspend fun shelfRediscover(nowMs: Long): HomeSection? {
-        val recent     = playEventDao.getRecent(500).map { it.videoId }.toSet()
-        val allPlays   = playEventDao.getRecent(2000)
-        val playCounts = allPlays.groupingBy { it.videoId }.eachCount()
+    private suspend fun shelfRediscover(): HomeSection? {
+        val recentIds   = playEventDao.getRecent(500).map { it.videoId }.toSet()
+        val frequentIds = playEventDao.getVideoIdsPlayedAtLeast(minCount = 5, limit = SHELF_LIMIT + 20)
+            .filter { it !in recentIds }
+            .take(SHELF_LIMIT)
 
-        val rediscoverIds = playCounts
-            .filter { (videoId, count) -> count >= 5 && videoId !in recent }
-            .keys.take(SHELF_LIMIT)
-
-        val tracks = rediscoverIds.mapNotNull { id ->
+        val tracks = frequentIds.mapNotNull { id ->
             candidateDao.getByVideoId(id)?.toTrack()
         }
         return if (tracks.isEmpty()) null
@@ -397,14 +398,25 @@ class HomeFeedRepository @Inject constructor(
     // ── 8. Recommended Albums ─────────────────────────────────────────────────
 
     private suspend fun shelfRecommendedAlbums(
-        tasteProfile: TasteProfileEngine.TasteProfile
+        candidates: List<RecommendationCandidateEntity>,
+        tasteProfile: TasteProfileEngine.TasteProfile,
+        scoreMap: Map<String, Float>
     ): HomeSection? {
         val topArtist = tasteProfile.topArtists.firstOrNull() ?: return null
-        val results = try {
-            searchRepository.search("$topArtist album")
-        } catch (_: Exception) { emptyList() }
-        return if (results.isEmpty()) null
-        else HomeSection("recommended_albums", "Recommended Albums", results.take(SHELF_LIMIT))
+
+        val albumTracks = candidates
+            .filter { it.artistName.equals(topArtist, ignoreCase = true) }
+            .map { it to (scoreMap[it.videoId] ?: it.popularityScore) }
+            .sortedByDescending { it.second }
+            .take(SHELF_LIMIT)
+
+        if (albumTracks.isEmpty()) return null
+
+        return HomeSection(
+            id     = "recommended_albums",
+            title  = "Recommended Albums",
+            tracks = albumTracks.map { it.first.toTrack() }
+        )
     }
 
     // ── 9. Night Listening Mix (9PM–5AM) ──────────────────────────────────────
@@ -414,10 +426,9 @@ class HomeFeedRepository @Inject constructor(
         scoreMap: Map<String, Float>,
         nowHour: Int
     ): HomeSection? {
-        val isNightTime = nowHour >= 21 || nowHour < 5
-        if (!isNightTime) return null
+        if (nowHour in 5..20) return null
 
-        val nightKeywords = setOf("chill", "acoustic", "ambient", "classical", "lofi", "lo-fi", "sleep", "calm")
+        val nightKeywords = setOf("chill", "acoustic", "ambient", "classical", "lo-fi", "sleep", "calm")
         val nightCandidates = candidates.filter { c ->
             val tokens = c.metadataTokens.lowercase()
             nightKeywords.any { tokens.contains(it) }
@@ -527,6 +538,7 @@ class HomeFeedRepository @Inject constructor(
 
     // ── Mapper ────────────────────────────────────────────────────────────────
 
+    @Suppress("SpellCheckingInspection")
     private fun RecommendationCandidateEntity.toTrack() = Track(
         id           = videoId,
         title        = title,

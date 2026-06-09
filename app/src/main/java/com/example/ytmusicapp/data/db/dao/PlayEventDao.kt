@@ -27,6 +27,15 @@ interface PlayEventDao {
     """)
     suspend fun getPartiallyPlayed(limit: Int): List<PlayEventEntity>
 
+    @Query("""
+        SELECT videoId FROM play_events
+        GROUP BY videoId
+        HAVING COUNT(*) >= :minCount
+        ORDER BY MAX(timestamp) DESC
+        LIMIT :limit
+    """)
+    suspend fun getVideoIdsPlayedAtLeast(minCount: Int, limit: Int): List<String>
+
     @Query("DELETE FROM play_events WHERE timestamp < :beforeMs")
     suspend fun deleteOlderThan(beforeMs: Long)
 }

@@ -66,6 +66,7 @@ class PlayerViewModel @Inject constructor(
     private var skipFromTrackEnd = false
     private var trackStartMs: Long = 0L
     private var positionSaveTicker = 0
+    private var hasRestoredPosition = false
 
     init {
         startPositionUpdater()
@@ -112,14 +113,20 @@ class PlayerViewModel @Inject constructor(
         mediaController = controller
         controller.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
-                _uiState.value = _uiState.value.copy(isPlaying = isPlaying)
+                // Use playWhenReady instead of isPlaying — buffering after seek sets
+                // isPlaying=false transiently while playWhenReady stays true, which
+                // caused the play/pause icon flicker on every seek.
+                _uiState.value = _uiState.value.copy(isPlaying = controller.playWhenReady)
                 if (!isPlaying) persistPosition(controller.currentPosition)
             }
             override fun onPlaybackStateChanged(state: Int) {
                 if (state == Player.STATE_READY) {
                     val duration = controller.duration.coerceAtLeast(0L)
                     _uiState.value = _uiState.value.copy(durationMs = duration, isLoading = false)
-                    restoreSavedPosition(duration)
+                    if (!hasRestoredPosition) {
+                        hasRestoredPosition = true
+                        restoreSavedPosition(duration)
+                    }
                 }
                 if (state == Player.STATE_ENDED) onTrackEnded()
             }
@@ -166,10 +173,15 @@ class PlayerViewModel @Inject constructor(
             currentlyPlayingId = videoId
             trackStartMs = System.currentTimeMillis()
             positionSaveTicker = 0
+            hasRestoredPosition = false
             _uiState.value = _uiState.value.copy(isLoading = true, error = null, streamInfo = null)
             try {
+                // Fetch metadata only — stream URL resolved by StreamResolvingDataSourceFactory
+                // via ytmusic:// scheme so seeks hit the URL cache, not a fresh network call.
                 val streamInfo = getStreamUrlUseCase(videoId)
-                val mediaItem = MediaItem.fromUri(streamInfo.streamUrl)
+
+                // ytmusic://VIDEO_ID — resolved + cached in StreamResolvingDataSourceFactory
+                val mediaItem = MediaItem.fromUri("ytmusic://$videoId")
                 mediaController?.stop()
                 mediaController?.clearMediaItems()
                 mediaController?.setMediaItem(mediaItem)
@@ -181,7 +193,6 @@ class PlayerViewModel @Inject constructor(
                     isLoading  = false,
                     isPlaying  = true
                 )
-                // bulk ingest depth-2 then refresh feed
                 viewModelScope.launch {
                     try {
                         recommendationRepository.fetchAndIngestRelatedTracksBulk(videoId)

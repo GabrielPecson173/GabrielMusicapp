@@ -20,6 +20,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -40,6 +45,16 @@ fun PlayerControls(
     onToggleRepeat: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var isDragging by remember { mutableStateOf(false) }
+    var dragFraction by remember { mutableFloatStateOf(0f) }
+
+    val sliderValue = when {
+        isDragging          -> dragFraction
+        durationMs > 0      -> positionMs / durationMs.toFloat()
+        else                -> 0f
+    }
+    val displayPositionMs = if (isDragging) (dragFraction * durationMs).toLong() else positionMs
+
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -47,8 +62,15 @@ fun PlayerControls(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Slider(
-            value = if (durationMs > 0) positionMs / durationMs.toFloat() else 0f,
-            onValueChange = { fraction -> onSeek((fraction * durationMs).toLong()) },
+            value = sliderValue,
+            onValueChange = { fraction ->
+                isDragging = true
+                dragFraction = fraction
+            },
+            onValueChangeFinished = {
+                onSeek((dragFraction * durationMs).toLong())
+                isDragging = false
+            },
             modifier = Modifier.fillMaxWidth()
         )
 
@@ -57,7 +79,7 @@ fun PlayerControls(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text(
-                text = formatDuration(positionMs),
+                text = formatDuration(displayPositionMs),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -112,7 +134,7 @@ fun PlayerControls(
                 Icon(
                     imageVector = when (repeatMode) {
                         RepeatMode.ONE -> Icons.Default.RepeatOne
-                        else -> Icons.Default.Repeat
+                        else           -> Icons.Default.Repeat
                     },
                     contentDescription = "Repeat",
                     tint = if (repeatMode != RepeatMode.NONE) MaterialTheme.colorScheme.primary
