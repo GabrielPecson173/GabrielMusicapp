@@ -5,11 +5,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.DownloadDone
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -24,7 +19,6 @@ import com.example.ytmusicapp.domain.model.Track
 fun TrackListItem(
     track: Track,
     onClick: () -> Unit,
-    onDownloadClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Row(
@@ -59,14 +53,6 @@ fun TrackListItem(
             )
         }
 
-        IconButton(onClick = onDownloadClick) {
-            Icon(
-                imageVector = if (track.isDownloaded) Icons.Default.DownloadDone
-                else Icons.Default.Download,
-                contentDescription = if (track.isDownloaded) "Downloaded" else "Download",
-                tint = if (track.isDownloaded) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.onSurface
-            )
-        }
+        DownloadStatusIndicator(track = track)
     }
 }

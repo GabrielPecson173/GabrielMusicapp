@@ -16,6 +16,7 @@ import javax.inject.Inject
 
 data class DownloadsUiState(
     val active: List<DownloadEntity> = emptyList(),
+    val failed: List<DownloadEntity> = emptyList(),
     val completed: List<DownloadEntity> = emptyList(),
     val isLoading: Boolean = false,
     val error: String? = null
@@ -36,19 +37,16 @@ class DownloadsViewModel @Inject constructor(
 
     private fun observeDownloads() {
         viewModelScope.launch {
-            // Combine QUEUED + DOWNLOADING into single active list
+            // Combine QUEUED + DOWNLOADING into a single active list; FAILED gets its own
+            // section so it's actually visible and retriable (previously it was queried nowhere).
             combine(
                 downloadRepository.getDownloadsByStatus(DownloadRepository.STATUS_QUEUED),
                 downloadRepository.getDownloadsByStatus(DownloadRepository.STATUS_DOWNLOADING),
+                downloadRepository.getDownloadsByStatus(DownloadRepository.STATUS_FAILED),
                 downloadRepository.getDownloadsByStatus(DownloadRepository.STATUS_COMPLETED)
-            ) { queued, downloading, completed ->
-                Triple(queued + downloading, completed, null as String?)
-            }.collect { (active, completed, _) ->
-                _uiState.value = _uiState.value.copy(
-                    active = active,
-                    completed = completed
-                )
-            }
+            ) { queued, downloading, failed, completed ->
+                _uiState.value.copy(active = queued + downloading, failed = failed, completed = completed)
+            }.collect { newState -> _uiState.value = newState }
         }
     }
 
@@ -60,6 +58,18 @@ class DownloadsViewModel @Inject constructor(
                 _uiState.value = _uiState.value.copy(error = e.message)
             }
         }
+    }
+
+    fun retry(download: DownloadEntity) {
+        val track = Track(
+            id = download.trackId,
+            title = download.title,
+            artist = download.artist,
+            album = "",
+            thumbnailUrl = download.thumbnailUrl,
+            durationMs = 0L
+        )
+        download(track)
     }
 
     fun cancel(trackId: String) {

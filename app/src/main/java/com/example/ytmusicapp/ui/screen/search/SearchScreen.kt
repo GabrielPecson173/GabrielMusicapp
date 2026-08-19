@@ -104,7 +104,6 @@ fun SearchScreen(
                                     playerViewModel.setQueue(listOf(track), 0)
                                     onTrackClick(track.id)
                                 },
-                                onDownloadClick = {},
                                 modifier = Modifier.fillMaxWidth()
                             )
                         }

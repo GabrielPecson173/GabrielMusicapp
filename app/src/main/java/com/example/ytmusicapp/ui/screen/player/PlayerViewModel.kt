@@ -276,6 +276,35 @@ class PlayerViewModel @Inject constructor(
         viewModelScope.launch { queueRepository.replaceQueue(queue) }
     }
 
+    /** Queues an arbitrary track (not necessarily the one currently playing) to play next. */
+    fun queueTrackNext(track: Track) {
+        val state = _uiState.value
+        if (state.track == null) { setTrack(track); setQueue(listOf(track), 0); loadTrack(track.id); return }
+        val queue = state.queue.toMutableList()
+        queue.add((state.queueIndex + 1).coerceAtMost(queue.size), track)
+        _uiState.value = state.copy(queue = queue)
+        viewModelScope.launch { queueRepository.replaceQueue(queue) }
+        prefetchNextTrack()
+    }
+
+    /** Appends an arbitrary track (not necessarily the one currently playing) to the queue's end. */
+    fun queueTrackAtEnd(track: Track) {
+        val state = _uiState.value
+        if (state.track == null) { setTrack(track); setQueue(listOf(track), 0); loadTrack(track.id); return }
+        val queue = state.queue + track
+        _uiState.value = state.copy(queue = queue)
+        viewModelScope.launch { queueRepository.replaceQueue(queue) }
+    }
+
+    /** Starts a fresh radio queue seeded by an arbitrary track and begins playing it. */
+    fun startRadioWith(track: Track) {
+        setQueueMode(QueueMode.RADIO)
+        setTrack(track)
+        setQueue(listOf(track), 0)
+        currentlyPlayingId = null
+        loadTrack(track.id)
+    }
+
     fun onPlayNext() {
         val state   = _uiState.value
         val current = state.track ?: return

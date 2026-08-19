@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -25,6 +26,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -50,8 +52,7 @@ fun DownloadsScreen(
             artist = download.artist,
             album = "",
             thumbnailUrl = download.thumbnailUrl,
-            durationMs = 0L,
-            isDownloaded = true
+            durationMs = 0L
         )
         playerViewModel.setTrack(track)
         playerViewModel.setQueue(listOf(track), 0)
@@ -68,7 +69,7 @@ fun DownloadsScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            if (uiState.active.isEmpty() && uiState.completed.isEmpty()) {
+            if (uiState.active.isEmpty() && uiState.failed.isEmpty() && uiState.completed.isEmpty()) {
                 Text(
                     text = "No downloads",
                     style = MaterialTheme.typography.bodyLarge,
@@ -90,7 +91,30 @@ fun DownloadsScreen(
                             DownloadItem(
                                 download = download,
                                 onClick = { playDownload(download) },
-                                onCancel = { viewModel.cancel(download.trackId) },
+                                trailingIcon = Icons.Default.Close,
+                                trailingDescription = "Cancel",
+                                onTrailingClick = { viewModel.cancel(download.trackId) },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                        item { HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp)) }
+                    }
+
+                    if (uiState.failed.isNotEmpty()) {
+                        item {
+                            Text(
+                                text = "Failed",
+                                style = MaterialTheme.typography.titleMedium,
+                                modifier = Modifier.padding(16.dp)
+                            )
+                        }
+                        items(uiState.failed) { download ->
+                            DownloadItem(
+                                download = download,
+                                onClick = { playDownload(download) },
+                                trailingIcon = Icons.Default.Refresh,
+                                trailingDescription = "Retry",
+                                onTrailingClick = { viewModel.retry(download) },
                                 modifier = Modifier.fillMaxWidth()
                             )
                         }
@@ -109,7 +133,9 @@ fun DownloadsScreen(
                             DownloadItem(
                                 download = download,
                                 onClick = { playDownload(download) },
-                                onCancel = { viewModel.remove(download.trackId) },
+                                trailingIcon = Icons.Default.Delete,
+                                trailingDescription = "Remove",
+                                onTrailingClick = { viewModel.remove(download.trackId) },
                                 modifier = Modifier.fillMaxWidth()
                             )
                         }
@@ -124,7 +150,9 @@ fun DownloadsScreen(
 private fun DownloadItem(
     download: DownloadEntity,
     onClick: () -> Unit,
-    onCancel: () -> Unit,
+    trailingIcon: ImageVector,
+    trailingDescription: String,
+    onTrailingClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Row(
@@ -161,14 +189,8 @@ private fun DownloadItem(
             )
         }
 
-        IconButton(onClick = onCancel) {
-            Icon(
-                imageVector = if (download.status == DownloadRepository.STATUS_COMPLETED)
-                    Icons.Default.Delete
-                else
-                    Icons.Default.Close,
-                contentDescription = "Remove"
-            )
+        IconButton(onClick = onTrailingClick) {
+            Icon(imageVector = trailingIcon, contentDescription = trailingDescription)
         }
     }
 }

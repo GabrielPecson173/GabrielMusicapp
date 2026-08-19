@@ -5,8 +5,6 @@ import androidx.lifecycle.viewModelScope
 import com.example.ytmusicapp.data.repository.HomeFeedRepository
 import com.example.ytmusicapp.data.repository.HomeSection
 import com.example.ytmusicapp.data.repository.RecommendationRepository
-import com.example.ytmusicapp.domain.model.Track
-import com.example.ytmusicapp.domain.usecase.DownloadTrackUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -28,8 +26,7 @@ data class HomeUiState(
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val homeFeedRepository: HomeFeedRepository,
-    private val recommendationRepository: RecommendationRepository,
-    private val downloadTrackUseCase: DownloadTrackUseCase
+    private val recommendationRepository: RecommendationRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HomeUiState(isLoading = true))
@@ -66,18 +63,6 @@ class HomeViewModel @Inject constructor(
             _uiState.update { it.copy(isLoading = true, error = null, selectedGenre = "all") }
             homeFeedRepository.refresh()
             loadAvailableGenres()
-        }
-    }
-
-    // ── Download ──────────────────────────────────────────────────────────────
-
-    fun download(track: Track) {
-        viewModelScope.launch {
-            try {
-                downloadTrackUseCase(track)
-            } catch (e: Exception) {
-                _uiState.update { it.copy(error = "Download failed: ${e.message}") }
-            }
         }
     }
 

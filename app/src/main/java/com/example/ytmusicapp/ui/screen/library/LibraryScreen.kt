@@ -80,7 +80,6 @@ fun LibraryScreen(
                             TrackListItem(
                                 track = track,
                                 onClick = { onTrackClick(track.id) },
-                                onDownloadClick = {},
                                 modifier = Modifier.fillMaxWidth()
                             )
                         }
