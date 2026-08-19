@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -27,16 +28,35 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil.compose.AsyncImage
 import com.example.ytmusicapp.data.db.entity.DownloadEntity
 import com.example.ytmusicapp.data.repository.DownloadRepository
+import com.example.ytmusicapp.domain.model.Track
+import com.example.ytmusicapp.ui.screen.player.PlayerViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DownloadsScreen(
     onTrackClick: (String) -> Unit,
+    playerViewModel: PlayerViewModel,
     viewModel: DownloadsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+
+    fun playDownload(download: DownloadEntity) {
+        val track = Track(
+            id = download.trackId,
+            title = download.title,
+            artist = download.artist,
+            album = "",
+            thumbnailUrl = download.thumbnailUrl,
+            durationMs = 0L,
+            isDownloaded = true
+        )
+        playerViewModel.setTrack(track)
+        playerViewModel.setQueue(listOf(track), 0)
+        onTrackClick(download.trackId)
+    }
 
     Scaffold(
         topBar = {
@@ -69,7 +89,7 @@ fun DownloadsScreen(
                         items(uiState.active) { download ->
                             DownloadItem(
                                 download = download,
-                                onClick = { onTrackClick(download.trackId) },
+                                onClick = { playDownload(download) },
                                 onCancel = { viewModel.cancel(download.trackId) },
                                 modifier = Modifier.fillMaxWidth()
                             )
@@ -88,7 +108,7 @@ fun DownloadsScreen(
                         items(uiState.completed) { download ->
                             DownloadItem(
                                 download = download,
-                                onClick = { onTrackClick(download.trackId) },
+                                onClick = { playDownload(download) },
                                 onCancel = { viewModel.remove(download.trackId) },
                                 modifier = Modifier.fillMaxWidth()
                             )
@@ -113,7 +133,12 @@ private fun DownloadItem(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Column(modifier = Modifier.weight(1f)) {
+        AsyncImage(
+            model = download.thumbnailUrl,
+            contentDescription = null,
+            modifier = Modifier.size(48.dp)
+        )
+        Column(modifier = Modifier.weight(1f).padding(horizontal = 12.dp)) {
             Text(
                 text = download.title,
                 style = MaterialTheme.typography.bodyLarge,

@@ -180,7 +180,8 @@ fun AppNavGraph() {
                 DownloadsScreen(
                     onTrackClick = { trackId ->
                         navController.navigate(Screen.Player(trackId))
-                    }
+                    },
+                    playerViewModel = playerViewModel
                 )
             }
             composable<Screen.Player> { backStackEntry ->

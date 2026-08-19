@@ -11,5 +11,6 @@ data class DownloadEntity(
     val artist: String,
     val filePath: String,
     val status: String,
+    val thumbnailUrl: String = "",
     val createdAt: Long = System.currentTimeMillis()
 )

@@ -20,8 +20,8 @@ class DownloadManagerProvider @Inject constructor(
     @ApplicationContext private val context: Context,
     private val resolvingDataSourceFactory: StreamResolvingDataSourceFactory
 ) {
-    // ONE instance — shared by cache AND downloadManager
-    private val databaseProvider: StandaloneDatabaseProvider by lazy {
+    // ONE instance — shared by cache AND downloadManager (and the streaming cache, see PlaybackCacheProvider)
+    val databaseProvider: StandaloneDatabaseProvider by lazy {
         StandaloneDatabaseProvider(context)
     }
 

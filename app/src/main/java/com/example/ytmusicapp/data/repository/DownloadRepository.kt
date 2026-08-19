@@ -58,7 +58,8 @@ class DownloadRepository @Inject constructor(
                 title = track.title,
                 artist = track.artist,
                 filePath = downloadUri.toString(),
-                status = STATUS_QUEUED
+                status = STATUS_QUEUED,
+                thumbnailUrl = track.thumbnailUrl
             )
         )
     }

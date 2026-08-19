@@ -25,7 +25,7 @@ import com.example.ytmusicapp.data.db.entity.*
         SessionPairEntity::class,
         ShelfImpressionEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 @TypeConverters(VectorTypeConverter::class)
@@ -142,6 +142,14 @@ abstract class AppDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
                     "ALTER TABLE recommendation_candidates ADD COLUMN thumbnailUrl TEXT NOT NULL DEFAULT ''"
+                )
+            }
+        }
+
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE downloads ADD COLUMN thumbnailUrl TEXT NOT NULL DEFAULT ''"
                 )
             }
         }
