@@ -1,11 +1,14 @@
 package com.example.ytmusicapp.data.repository
 
 import com.example.ytmusicapp.data.db.dao.PlayEventDao
+import com.example.ytmusicapp.data.db.dao.PlaybackPositionDao
 import com.example.ytmusicapp.data.db.dao.RecommendationCandidateDao
+import com.example.ytmusicapp.data.db.dao.SearchEventDao
 import com.example.ytmusicapp.data.db.dao.SessionPairDao
 import com.example.ytmusicapp.data.db.dao.SkipEventDao
 import com.example.ytmusicapp.data.db.dao.SuppressionDao
 import com.example.ytmusicapp.data.db.entity.PlayEventEntity
+import com.example.ytmusicapp.data.db.entity.PlaybackPositionEntity
 import com.example.ytmusicapp.data.db.entity.RecommendationCandidateEntity
 import com.example.ytmusicapp.data.db.entity.SessionPairEntity
 import com.example.ytmusicapp.data.db.entity.SkipEventEntity
@@ -54,7 +57,9 @@ class RecommendationRepository @Inject constructor(
     private val candidateDao: RecommendationCandidateDao,
     private val suppressionDao: SuppressionDao,
     private val sessionPairDao: SessionPairDao,
-    private val searchRepository: SearchRepository
+    private val searchRepository: SearchRepository,
+    private val searchEventDao: SearchEventDao,
+    private val playbackPositionDao: PlaybackPositionDao
 ) {
 
     // ── Playback telemetry ────────────────────────────────────────────────────
@@ -241,15 +246,16 @@ class RecommendationRepository @Inject constructor(
         }
 
     // ── Playback position save/restore ────────────────────────────────────────
+    // Persisted in Room (not just in-memory) so a remembered position survives process death,
+    // not just in-app navigation.
 
-    private val playbackPositions = mutableMapOf<String, Long>()
-
-    fun savePlaybackPosition(videoId: String, positionMs: Long) {
-        playbackPositions[videoId] = positionMs
+    suspend fun savePlaybackPosition(videoId: String, positionMs: Long) = withContext(Dispatchers.IO) {
+        playbackPositionDao.upsert(PlaybackPositionEntity(videoId, positionMs))
     }
 
-    fun getPlaybackPosition(videoId: String): Long =
-        playbackPositions[videoId] ?: 0L
+    suspend fun getPlaybackPosition(videoId: String): Long = withContext(Dispatchers.IO) {
+        playbackPositionDao.get(videoId)?.positionMs ?: 0L
+    }
 
     // ── Maintenance ───────────────────────────────────────────────────────────
 
@@ -258,6 +264,14 @@ class RecommendationRepository @Inject constructor(
         suppressionDao.pruneExpired(System.currentTimeMillis())
         val cutoff24h = System.currentTimeMillis() - 24L * 60 * 60 * 1000
         sessionPairDao.deleteOlderThan(cutoff24h)
+    }
+
+    /** Clears listening/search/skip history and remembered playback positions. */
+    suspend fun clearListeningHistory() = withContext(Dispatchers.IO) {
+        playEventDao.deleteAll()
+        skipEventDao.deleteAll()
+        searchEventDao.deleteAll()
+        playbackPositionDao.clearAll()
     }
 
     // ── Mappers ───────────────────────────────────────────────────────────────

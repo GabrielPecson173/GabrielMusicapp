@@ -17,4 +17,7 @@ interface SearchEventDao {
 
     @Query("DELETE FROM search_events WHERE timestamp < :beforeMs")
     suspend fun deleteOlderThan(beforeMs: Long)
+
+    @Query("DELETE FROM search_events")
+    suspend fun deleteAll()
 }

@@ -1,5 +1,6 @@
 package com.example.ytmusicapp.data.tracker
 
+import com.example.ytmusicapp.data.datastore.UserPreferencesDataStore
 import com.example.ytmusicapp.data.db.dao.PlayEventDao
 import com.example.ytmusicapp.data.db.dao.SearchEventDao
 import com.example.ytmusicapp.data.db.dao.ShelfImpressionDao
@@ -20,9 +21,18 @@ class EventTracker @Inject constructor(
     private val playEventDao: PlayEventDao,
     private val skipEventDao: SkipEventDao,
     private val searchEventDao: SearchEventDao,
-    private val shelfImpressionDao: ShelfImpressionDao
+    private val shelfImpressionDao: ShelfImpressionDao,
+    private val userPreferencesDataStore: UserPreferencesDataStore
 ) {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    @Volatile private var diagnosticsEnabled = true
+
+    init {
+        scope.launch {
+            userPreferencesDataStore.settings.collect { diagnosticsEnabled = it.diagnosticsEnabled }
+        }
+    }
 
     fun logPlay(
         videoId: String,
@@ -30,6 +40,7 @@ class EventTracker @Inject constructor(
         totalDurationMs: Long,
         isCompleted: Boolean
     ) {
+        if (!diagnosticsEnabled) return
         val completionRate = if (totalDurationMs > 0) {
             (playDurationMs.toFloat() / totalDurationMs).coerceIn(0f, 1f)
         } else 0f
@@ -51,6 +62,7 @@ class EventTracker @Inject constructor(
     }
 
     fun logSkip(videoId: String, skipPositionMs: Long) {
+        if (!diagnosticsEnabled) return
         val wasUnder30s = skipPositionMs < 30_000L
         scope.launch {
             skipEventDao.insert(
@@ -65,6 +77,7 @@ class EventTracker @Inject constructor(
     }
 
     fun logSearch(query: String, clickedVideoId: String?) {
+        if (!diagnosticsEnabled) return
         scope.launch {
             searchEventDao.insert(
                 SearchEventEntity(
@@ -77,6 +90,7 @@ class EventTracker @Inject constructor(
     }
 
     fun logImpression(sectionId: String) {
+        if (!diagnosticsEnabled) return
         scope.launch {
             shelfImpressionDao.insert(
                 ShelfImpressionEntity(
@@ -90,6 +104,7 @@ class EventTracker @Inject constructor(
     }
 
     fun logSectionClick(sectionId: String) {
+        if (!diagnosticsEnabled) return
         scope.launch {
             shelfImpressionDao.insert(
                 ShelfImpressionEntity(
@@ -112,6 +127,7 @@ class EventTracker @Inject constructor(
     }
 
     fun logNotInterested(videoId: String) {
+        if (!diagnosticsEnabled) return
         scope.launch {
             skipEventDao.insert(
                 SkipEventEntity(

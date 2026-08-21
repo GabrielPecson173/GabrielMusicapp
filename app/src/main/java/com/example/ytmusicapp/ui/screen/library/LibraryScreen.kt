@@ -25,6 +25,7 @@ import com.example.ytmusicapp.ui.component.TrackListItem
 @Composable
 fun LibraryScreen(
     onTrackClick: (String) -> Unit,
+    onArtistClick: (String) -> Unit = {},
     viewModel: LibraryViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -80,6 +81,7 @@ fun LibraryScreen(
                             TrackListItem(
                                 track = track,
                                 onClick = { onTrackClick(track.id) },
+                                onArtistClick = onArtistClick,
                                 modifier = Modifier.fillMaxWidth()
                             )
                         }

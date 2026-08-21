@@ -6,6 +6,8 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import com.example.ytmusicapp.data.db.entity.PlayEventEntity
 
+data class VideoPlayCount(val videoId: String, val playCount: Int)
+
 @Dao
 interface PlayEventDao {
 
@@ -36,6 +38,12 @@ interface PlayEventDao {
     """)
     suspend fun getVideoIdsPlayedAtLeast(minCount: Int, limit: Int): List<String>
 
+    @Query("SELECT videoId, COUNT(*) as playCount FROM play_events GROUP BY videoId")
+    suspend fun getPlayCounts(): List<VideoPlayCount>
+
     @Query("DELETE FROM play_events WHERE timestamp < :beforeMs")
     suspend fun deleteOlderThan(beforeMs: Long)
+
+    @Query("DELETE FROM play_events")
+    suspend fun deleteAll()
 }

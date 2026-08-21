@@ -64,6 +64,13 @@ class PlaybackCacheProvider @Inject constructor(
             .setCacheWriteDataSinkFactory(null) // never write into the permanent downloads cache from normal playback
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
 
+    /** Purges the bounded streaming cache only — never touches the permanent downloads cache. */
+    fun clearStreamingCache() {
+        streamingCache.keys.toList().forEach { key ->
+            try { streamingCache.removeResource(key) } catch (_: Exception) {}
+        }
+    }
+
     @Volatile private var activeWriter: CacheWriter? = null
 
     /** Cancels any in-flight [prefetchBlocking] call. Safe to call from any thread. */

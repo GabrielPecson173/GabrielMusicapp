@@ -19,10 +19,22 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.Radio
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.DownloadDone
+import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.PlaylistAdd
+import androidx.compose.material.icons.outlined.PlaylistPlay
+import androidx.compose.material.icons.outlined.Radio
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -49,12 +61,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.example.ytmusicapp.domain.model.Track
-
-private val SheetBg         = Color(0xFF1C1C1C)
-private val SheetFg         = Color(0xFFEEEEEE)
-private val SheetSubtle     = Color(0xFF666666)
-private val SheetBorder     = Color(0xFF333333)
-private val LimeGreenBright = Color(0xFFBEF264)
+import com.example.ytmusicapp.ui.theme.LocalAppPalette
+import com.example.ytmusicapp.ui.theme.modularIcon
 
 private data class DownloadRowSpec(
     val icon: ImageVector,
@@ -75,8 +83,10 @@ fun TrackOptionsBottomSheet(
     onStartRadio: () -> Unit,
     onPlayNext: () -> Unit,
     onAddToQueue: () -> Unit,
+    onGoToArtist: (String) -> Unit = {},
     downloadViewModel: DownloadStatusViewModel = hiltViewModel()
 ) {
+    val palette = LocalAppPalette.current
     val context = LocalContext.current
     var showDetails by remember { mutableStateOf(false) }
     val downloadStatus by remember(track.id) { downloadViewModel.statusFlow(track.id) }
@@ -85,8 +95,8 @@ fun TrackOptionsBottomSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = SheetBg,
-        contentColor = SheetFg,
+        containerColor = palette.surface,
+        contentColor = palette.onSurface,
         dragHandle = null
     ) {
         if (showDetails) {
@@ -95,11 +105,11 @@ fun TrackOptionsBottomSheet(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = { showDetails = false }) {
-                    Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = SheetFg)
+                    Icon(modularIcon(Icons.Default.ArrowBack, Icons.Outlined.ArrowBack), contentDescription = "Back", tint = palette.onSurface)
                 }
-                Text("Details", color = SheetFg, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                Text("Details", color = palette.onSurface, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
             }
-            HorizontalDivider(color = SheetBorder)
+            HorizontalDivider(color = palette.border)
             InfoRow("Title", track.title)
             InfoRow("Artist", track.artist)
             InfoRow("Album", track.album.ifBlank { "—" })
@@ -119,42 +129,43 @@ fun TrackOptionsBottomSheet(
                 Spacer(modifier = Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        track.title, color = SheetFg, fontWeight = FontWeight.SemiBold, fontSize = 15.sp,
+                        track.title, color = palette.onSurface, fontWeight = FontWeight.SemiBold, fontSize = 15.sp,
                         maxLines = 1, overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        track.artist, color = SheetSubtle, fontSize = 13.sp,
+                        track.artist, color = palette.subtleText, fontSize = 13.sp,
                         maxLines = 1, overflow = TextOverflow.Ellipsis
                     )
                 }
                 IconButton(onClick = onDismiss) {
-                    Icon(Icons.Default.Close, contentDescription = "Close", tint = SheetSubtle)
+                    Icon(modularIcon(Icons.Default.Close, Icons.Outlined.Close), contentDescription = "Close", tint = palette.subtleText)
                 }
             }
-            HorizontalDivider(color = SheetBorder)
+            HorizontalDivider(color = palette.border)
 
-            SheetItem(Icons.Default.Radio, "Start Radio") { onStartRadio(); onDismiss() }
-            SheetItem(Icons.Default.PlaylistPlay, "Play Next") { onPlayNext(); onDismiss() }
-            SheetItem(Icons.Default.PlaylistAdd, "Add to Queue") { onAddToQueue(); onDismiss() }
+            SheetItem(modularIcon(Icons.Default.Radio, Icons.Outlined.Radio), "Start Radio") { onStartRadio(); onDismiss() }
+            SheetItem(modularIcon(Icons.Default.PlaylistPlay, Icons.Outlined.PlaylistPlay), "Play Next") { onPlayNext(); onDismiss() }
+            SheetItem(modularIcon(Icons.Default.PlaylistAdd, Icons.Outlined.PlaylistAdd), "Add to Queue") { onAddToQueue(); onDismiss() }
+            SheetItem(modularIcon(Icons.Default.Person, Icons.Outlined.Person), "Go to Artist") { onGoToArtist(track.artist); onDismiss() }
 
-            HorizontalDivider(color = SheetBorder, modifier = Modifier.padding(vertical = 4.dp))
+            HorizontalDivider(color = palette.border, modifier = Modifier.padding(vertical = 4.dp))
 
             val (downloadIcon, downloadLabel, downloadTint, downloadAction) = when (downloadStatus) {
                 DownloadUiStatus.NOT_DOWNLOADED -> DownloadRowSpec(
-                    Icons.Default.Download, "Download", SheetFg
+                    modularIcon(Icons.Default.Download, Icons.Outlined.Download), "Download", palette.onSurface
                 ) { downloadViewModel.download(track) }
                 DownloadUiStatus.DOWNLOADING -> DownloadRowSpec(
-                    Icons.Default.Download, "Downloading… (tap to cancel)", LimeGreenBright
+                    modularIcon(Icons.Default.Download, Icons.Outlined.Download), "Downloading… (tap to cancel)", palette.accent
                 ) { downloadViewModel.cancel(track.id) }
                 DownloadUiStatus.DOWNLOADED -> DownloadRowSpec(
-                    Icons.Default.DownloadDone, "Downloaded (tap to remove)", LimeGreenBright
+                    modularIcon(Icons.Default.DownloadDone, Icons.Outlined.DownloadDone), "Downloaded (tap to remove)", palette.accent
                 ) { downloadViewModel.remove(track.id) }
                 DownloadUiStatus.FAILED -> DownloadRowSpec(
-                    Icons.Default.ErrorOutline, "Download failed — tap to retry", Color(0xFFE57373)
+                    modularIcon(Icons.Default.ErrorOutline, Icons.Outlined.ErrorOutline), "Download failed — tap to retry", Color(0xFFE57373)
                 ) { downloadViewModel.download(track) }
             }
             SheetItem(downloadIcon, downloadLabel, downloadTint) { downloadAction(); onDismiss() }
-            SheetItem(Icons.Default.Share, "Share") {
+            SheetItem(modularIcon(Icons.Default.Share, Icons.Outlined.Share), "Share") {
                 val youtubeUrl = "https://music.youtube.com/watch?v=${track.id}"
                 val intent = Intent(Intent.ACTION_SEND).apply {
                     type = "text/plain"
@@ -163,7 +174,7 @@ fun TrackOptionsBottomSheet(
                 context.startActivity(Intent.createChooser(intent, null))
                 onDismiss()
             }
-            SheetItem(Icons.Default.Info, "Details") { showDetails = true }
+            SheetItem(modularIcon(Icons.Default.Info, Icons.Outlined.Info), "Details") { showDetails = true }
 
             Spacer(modifier = Modifier.height(24.dp))
         }
@@ -172,16 +183,17 @@ fun TrackOptionsBottomSheet(
 
 @Composable
 private fun InfoRow(label: String, value: String) {
+    val palette = LocalAppPalette.current
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp)) {
-        Text(label, color = SheetSubtle, fontSize = 11.sp)
+        Text(label, color = palette.subtleText, fontSize = 11.sp)
         Spacer(modifier = Modifier.height(2.dp))
-        Text(value, color = SheetFg, fontSize = 14.sp)
+        Text(value, color = palette.onSurface, fontSize = 14.sp)
     }
-    HorizontalDivider(color = SheetBorder, modifier = Modifier.padding(horizontal = 20.dp))
+    HorizontalDivider(color = palette.border, modifier = Modifier.padding(horizontal = 20.dp))
 }
 
 @Composable
-private fun SheetItem(icon: ImageVector, label: String, tint: Color = SheetFg, onClick: () -> Unit) {
+private fun SheetItem(icon: ImageVector, label: String, tint: Color = LocalAppPalette.current.onSurface, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()

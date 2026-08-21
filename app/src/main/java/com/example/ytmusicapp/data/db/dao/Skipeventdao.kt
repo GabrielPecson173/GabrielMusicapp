@@ -20,4 +20,7 @@ interface SkipEventDao {
 
     @Query("DELETE FROM skip_events WHERE timestamp < :beforeMs")
     suspend fun deleteOlderThan(beforeMs: Long)
+
+    @Query("DELETE FROM skip_events")
+    suspend fun deleteAll()
 }

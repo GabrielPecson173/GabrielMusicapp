@@ -42,7 +42,9 @@ class AudioPlaybackService : MediaSessionService() {
         const val CMD_GET_EQUALIZER_STATE   = "com.example.ytmusicapp.GET_EQUALIZER_STATE"
         const val CMD_SET_EQUALIZER_BAND    = "com.example.ytmusicapp.SET_EQUALIZER_BAND"
         const val CMD_SET_EQUALIZER_ENABLED = "com.example.ytmusicapp.SET_EQUALIZER_ENABLED"
+        const val CMD_SET_NORMALIZATION_ENABLED = "com.example.ytmusicapp.SET_NORMALIZATION_ENABLED"
 
+        const val EXTRA_NORMALIZATION_ENABLED = "normalizationEnabled"
         const val EXTRA_AUDIO_SESSION_ID = "audioSessionId"
         const val EXTRA_EQ_ENABLED       = "eqEnabled"
         const val EXTRA_EQ_NUM_BANDS     = "eqNumBands"
@@ -63,6 +65,7 @@ class AudioPlaybackService : MediaSessionService() {
 
     private var loudnessEnhancer: LoudnessEnhancer? = null
     private var currentTrackLufs: Float = DEFAULT_TRACK_LUFS
+    private var normalizationEnabled = true
 
     private var equalizer: Equalizer? = null
     private var eqEnabled = false
@@ -128,6 +131,7 @@ class AudioPlaybackService : MediaSessionService() {
                         .add(SessionCommand(CMD_GET_EQUALIZER_STATE, Bundle.EMPTY))
                         .add(SessionCommand(CMD_SET_EQUALIZER_BAND, Bundle.EMPTY))
                         .add(SessionCommand(CMD_SET_EQUALIZER_ENABLED, Bundle.EMPTY))
+                        .add(SessionCommand(CMD_SET_NORMALIZATION_ENABLED, Bundle.EMPTY))
                         .build()
                     return MediaSession.ConnectionResult.accept(sessionCommands, result.availablePlayerCommands)
                 }
@@ -184,6 +188,11 @@ class AudioPlaybackService : MediaSessionService() {
                             }
                             return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
                         }
+                        CMD_SET_NORMALIZATION_ENABLED -> {
+                            normalizationEnabled = args.getBoolean(EXTRA_NORMALIZATION_ENABLED, true)
+                            applyNormalization(player.audioSessionId, currentTrackLufs)
+                            return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+                        }
                     }
                     return super.onCustomCommand(session, controller, customCommand, args)
                 }
@@ -198,6 +207,13 @@ class AudioPlaybackService : MediaSessionService() {
 
     private fun applyNormalization(audioSessionId: Int, trackLufs: Float) {
         if (audioSessionId == C.AUDIO_SESSION_ID_UNSET) return
+
+        if (!normalizationEnabled) {
+            loudnessEnhancer?.release()
+            loudnessEnhancer = null
+            player.volume = 1f
+            return
+        }
 
         val gainMb = ((TARGET_LUFS - trackLufs) * 100f)
             .toInt()

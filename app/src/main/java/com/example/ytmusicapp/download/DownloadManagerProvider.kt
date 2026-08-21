@@ -13,6 +13,7 @@ import java.util.concurrent.Executors
 import javax.inject.Inject
 import javax.inject.Singleton
 import androidx.media3.exoplayer.offline.DownloadManager
+import androidx.media3.exoplayer.scheduler.Requirements
 
 @OptIn(UnstableApi::class)
 @Singleton
@@ -39,5 +40,10 @@ class DownloadManagerProvider @Inject constructor(
         ).apply {
             maxParallelDownloads = 3
         }
+    }
+
+    fun setWifiOnly(enabled: Boolean) {
+        downloadManager.requirements =
+            Requirements(if (enabled) Requirements.NETWORK_UNMETERED else Requirements.NETWORK)
     }
 }

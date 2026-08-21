@@ -34,6 +34,17 @@ import androidx.compose.material.icons.filled.Radio
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.Equalizer
+import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material.icons.outlined.MusicNote
+import androidx.compose.material.icons.outlined.OpenInNew
+import androidx.compose.material.icons.outlined.PlaylistAdd
+import androidx.compose.material.icons.outlined.Radio
+import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material.icons.outlined.Speed
+import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -58,7 +69,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -68,24 +78,22 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.ytmusicapp.domain.model.Track
+import com.example.ytmusicapp.ui.theme.LocalAppPalette
+import com.example.ytmusicapp.ui.theme.activeIndicatorColor
+import com.example.ytmusicapp.ui.theme.modularIcon
 import kotlinx.coroutines.delay
-
-private val BgDeep      = Color(0xFF0E0E0E)
-private val SheetBg     = Color(0xFF1C1C1C)
-private val SheetFg     = Color(0xFFEEEEEE)
-private val SheetSubtle = Color(0xFF666666)
-private val SheetBorder = Color(0xFF333333)
 
 // ── Queue Sheet ───────────────────────────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun QueueSheet(uiState: PlayerUiState, viewModel: PlayerViewModel) {
+    val palette = LocalAppPalette.current
     ModalBottomSheet(
         onDismissRequest = { viewModel.toggleQueueExpanded() },
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = SheetBg,
-        contentColor = SheetFg,
+        containerColor = palette.surface,
+        contentColor = palette.onSurface,
         dragHandle = null
     ) {
         Row(
@@ -96,20 +104,20 @@ internal fun QueueSheet(uiState: PlayerUiState, viewModel: PlayerViewModel) {
         ) {
             Text(
                 text = if (uiState.queue.isEmpty()) "Queue" else "Up Next (${uiState.queue.size})",
-                color = SheetFg, fontWeight = FontWeight.SemiBold, fontSize = 15.sp,
+                color = palette.onSurface, fontWeight = FontWeight.SemiBold, fontSize = 15.sp,
                 modifier = Modifier.weight(1f)
             )
             IconButton(onClick = { viewModel.toggleQueueExpanded() }) {
-                Icon(Icons.Default.Close, contentDescription = "Close", tint = SheetSubtle)
+                Icon(modularIcon(Icons.Default.Close, Icons.Outlined.Close), contentDescription = "Close", tint = palette.subtleText)
             }
         }
-        HorizontalDivider(color = SheetBorder)
+        HorizontalDivider(color = palette.border)
 
         if (uiState.queue.isEmpty()) {
             Box(
                 modifier = Modifier.fillMaxWidth().padding(32.dp),
                 contentAlignment = Alignment.Center
-            ) { Text("Loading related songs…", color = SheetSubtle, fontSize = 13.sp) }
+            ) { Text("Loading related songs…", color = palette.subtleText, fontSize = 13.sp) }
         } else {
             LazyColumn(modifier = Modifier.fillMaxWidth().fillMaxHeight()) {
                 itemsIndexed(uiState.queue) { index, track ->
@@ -118,7 +126,7 @@ internal fun QueueSheet(uiState: PlayerUiState, viewModel: PlayerViewModel) {
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { viewModel.playFromQueue(index) }
-                            .background(if (isCurrent) SheetBg else BgDeep)
+                            .background(if (isCurrent) palette.surface else palette.background)
                             .padding(horizontal = 20.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -131,19 +139,19 @@ internal fun QueueSheet(uiState: PlayerUiState, viewModel: PlayerViewModel) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = track.title,
-                                color = if (isCurrent) SheetFg else SheetFg.copy(alpha = 0.75f),
+                                color = if (isCurrent) palette.onSurface else palette.onSurface.copy(alpha = 0.75f),
                                 fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
                                 fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
                             )
-                            Text(track.artist, color = SheetSubtle, fontSize = 12.sp,
+                            Text(track.artist, color = palette.subtleText, fontSize = 12.sp,
                                 maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         IconButton(onClick = { viewModel.removeFromQueue(index) }) {
-                            Icon(Icons.Default.Close, contentDescription = "Remove",
-                                tint = SheetSubtle, modifier = Modifier.size(18.dp))
+                            Icon(modularIcon(Icons.Default.Close, Icons.Outlined.Close), contentDescription = "Remove",
+                                tint = palette.subtleText, modifier = Modifier.size(18.dp))
                         }
                     }
-                    HorizontalDivider(color = SheetBorder,
+                    HorizontalDivider(color = palette.border,
                         modifier = Modifier.padding(horizontal = 20.dp))
                 }
             }
@@ -160,35 +168,36 @@ internal fun ShareBottomSheet(
     onDismiss: () -> Unit,
     onGenerateCard: () -> Unit
 ) {
+    val palette = LocalAppPalette.current
     val context = LocalContext.current
     val youtubeUrl = "https://music.youtube.com/watch?v=${track.id}"
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = SheetBg,
-        contentColor = SheetFg,
+        containerColor = palette.surface,
+        contentColor = palette.onSurface,
         dragHandle = null
     ) {
         SheetTitle("Share")
-        HorizontalDivider(color = SheetBorder)
-        SheetItem(Icons.Default.Link, "Copy YouTube Music link") {
+        HorizontalDivider(color = palette.border)
+        SheetItem(modularIcon(Icons.Default.Link, Icons.Outlined.Link), "Copy YouTube Music link") {
             copyToClipboard(context, "YouTube Music link", youtubeUrl); onDismiss()
         }
-        SheetItem(Icons.Default.ContentCopy, "Copy \"${track.title} — ${track.artist}\"") {
+        SheetItem(modularIcon(Icons.Default.ContentCopy, Icons.Outlined.ContentCopy), "Copy \"${track.title} — ${track.artist}\"") {
             copyToClipboard(context, "Song", "${track.title} — ${track.artist}"); onDismiss()
         }
-        SheetItem(Icons.Default.OpenInNew, "Open in YouTube Music") {
+        SheetItem(modularIcon(Icons.Default.OpenInNew, Icons.Outlined.OpenInNew), "Open in YouTube Music") {
             context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(youtubeUrl))); onDismiss()
         }
-        SheetItem(Icons.Default.Share, "Share link via…") {
+        SheetItem(modularIcon(Icons.Default.Share, Icons.Outlined.Share), "Share link via…") {
             val intent = Intent(Intent.ACTION_SEND).apply {
                 type = "text/plain"
                 putExtra(Intent.EXTRA_TEXT, youtubeUrl)
             }
             context.startActivity(Intent.createChooser(intent, null)); onDismiss()
         }
-        SheetItem(Icons.Default.MusicNote, "Generate Listening Card") {
+        SheetItem(modularIcon(Icons.Default.MusicNote, Icons.Outlined.MusicNote), "Generate Listening Card") {
             onGenerateCard(); onDismiss()
         }
         Spacer(modifier = Modifier.height(24.dp))
@@ -200,15 +209,16 @@ internal fun ShareBottomSheet(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun InfoBottomSheet(track: Track, onDismiss: () -> Unit) {
+    val palette = LocalAppPalette.current
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = SheetBg,
-        contentColor = SheetFg,
+        containerColor = palette.surface,
+        contentColor = palette.onSurface,
         dragHandle = null
     ) {
         SheetTitle("Song Info")
-        HorizontalDivider(color = SheetBorder)
+        HorizontalDivider(color = palette.border)
         InfoRow("Title",    track.title)
         InfoRow("Artist",   track.artist)
         InfoRow("Album",    track.album.ifBlank { "—" })
@@ -235,6 +245,7 @@ internal fun MoreBottomSheet(
     onEqualizer: () -> Unit,
     onOpenYouTube: () -> Unit
 ) {
+    val palette = LocalAppPalette.current
     val context = LocalContext.current
     val youtubeUrl = "https://music.youtube.com/watch?v=${track.id}"
 
@@ -250,31 +261,31 @@ internal fun MoreBottomSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = SheetBg,
-        contentColor = SheetFg,
+        containerColor = palette.surface,
+        contentColor = palette.onSurface,
         dragHandle = null
     ) {
         SheetTitle("More Options")
-        HorizontalDivider(color = SheetBorder)
+        HorizontalDivider(color = palette.border)
 
         SheetSectionLabel("Playback")
-        SheetItem(Icons.Default.MusicNote, "Lyrics") { onLyrics() }
-        SheetItem(Icons.Default.Timer, "Sleep Timer", subtitle = sleepTimerSubtitle) { onSleepTimer() }
-        SheetItem(Icons.Default.Speed, "Speed & Pitch", subtitle = speedPitchSubtitle) { onSpeedPitch() }
-        SheetItem(Icons.Default.Equalizer, "Equalizer") { onEqualizer() }
+        SheetItem(modularIcon(Icons.Default.MusicNote, Icons.Outlined.MusicNote), "Lyrics") { onLyrics() }
+        SheetItem(modularIcon(Icons.Default.Timer, Icons.Outlined.Timer), "Sleep Timer", subtitle = sleepTimerSubtitle) { onSleepTimer() }
+        SheetItem(modularIcon(Icons.Default.Speed, Icons.Outlined.Speed), "Speed & Pitch", subtitle = speedPitchSubtitle) { onSpeedPitch() }
+        SheetItem(modularIcon(Icons.Default.Equalizer, Icons.Outlined.Equalizer), "Equalizer") { onEqualizer() }
 
-        HorizontalDivider(color = SheetBorder, modifier = Modifier.padding(vertical = 4.dp))
+        HorizontalDivider(color = palette.border, modifier = Modifier.padding(vertical = 4.dp))
         SheetSectionLabel("Discovery")
-        SheetItem(Icons.Default.Radio, "Song Radio") { onRadioMode(); onDismiss() }
+        SheetItem(modularIcon(Icons.Default.Radio, Icons.Outlined.Radio), "Song Radio") { onRadioMode(); onDismiss() }
 
-        HorizontalDivider(color = SheetBorder, modifier = Modifier.padding(vertical = 4.dp))
+        HorizontalDivider(color = palette.border, modifier = Modifier.padding(vertical = 4.dp))
         SheetSectionLabel("Organization")
-        SheetItem(Icons.Default.PlaylistAdd, "Add to Queue") { onAddToQueue(); onDismiss() }
-        SheetItem(Icons.Default.PlaylistAdd, "Play Next")    { onPlayNext(); onDismiss() }
+        SheetItem(modularIcon(Icons.Default.PlaylistAdd, Icons.Outlined.PlaylistAdd), "Add to Queue") { onAddToQueue(); onDismiss() }
+        SheetItem(modularIcon(Icons.Default.PlaylistAdd, Icons.Outlined.PlaylistAdd), "Play Next")    { onPlayNext(); onDismiss() }
 
-        HorizontalDivider(color = SheetBorder, modifier = Modifier.padding(vertical = 4.dp))
+        HorizontalDivider(color = palette.border, modifier = Modifier.padding(vertical = 4.dp))
         SheetSectionLabel("Utility")
-        SheetItem(Icons.Default.OpenInNew, "Open in YouTube Music") {
+        SheetItem(modularIcon(Icons.Default.OpenInNew, Icons.Outlined.OpenInNew), "Open in YouTube Music") {
             context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(youtubeUrl))); onDismiss()
         }
 
@@ -293,11 +304,12 @@ internal fun LyricsBottomSheet(
     error: String?,
     onDismiss: () -> Unit
 ) {
+    val palette = LocalAppPalette.current
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = SheetBg,
-        contentColor = SheetFg,
+        containerColor = palette.surface,
+        contentColor = palette.onSurface,
         dragHandle = null
     ) {
         Row(
@@ -305,25 +317,25 @@ internal fun LyricsBottomSheet(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text("Lyrics", color = SheetFg, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-                Text(track.title, color = SheetSubtle, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("Lyrics", color = palette.onSurface, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                Text(track.title, color = palette.subtleText, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             IconButton(onClick = onDismiss) {
-                Icon(Icons.Default.Close, contentDescription = "Close", tint = SheetSubtle)
+                Icon(modularIcon(Icons.Default.Close, Icons.Outlined.Close), contentDescription = "Close", tint = palette.subtleText)
             }
         }
-        HorizontalDivider(color = SheetBorder)
+        HorizontalDivider(color = palette.border)
 
         Box(
             modifier = Modifier.fillMaxWidth().heightIn(min = 160.dp, max = 460.dp).padding(20.dp),
             contentAlignment = if (isLoading || error != null) Alignment.Center else Alignment.TopStart
         ) {
             when {
-                isLoading    -> CircularProgressIndicator(color = SheetFg, strokeWidth = 2.dp, modifier = Modifier.size(28.dp))
-                error != null -> Text(error, color = SheetSubtle, fontSize = 13.sp, textAlign = TextAlign.Center)
+                isLoading    -> CircularProgressIndicator(color = palette.onSurface, strokeWidth = 2.dp, modifier = Modifier.size(28.dp))
+                error != null -> Text(error, color = palette.subtleText, fontSize = 13.sp, textAlign = TextAlign.Center)
                 lyrics != null -> Text(
                     text = lyrics,
-                    color = SheetFg,
+                    color = palette.onSurface,
                     fontSize = 15.sp,
                     lineHeight = 24.sp,
                     modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
@@ -349,15 +361,16 @@ internal fun SleepTimerBottomSheet(
     onCancel: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    val palette = LocalAppPalette.current
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = SheetBg,
-        contentColor = SheetFg,
+        containerColor = palette.surface,
+        contentColor = palette.onSurface,
         dragHandle = null
     ) {
         SheetTitle("Sleep Timer")
-        HorizontalDivider(color = SheetBorder)
+        HorizontalDivider(color = palette.border)
 
         if (isActive) {
             var remaining by remember(endAtMs) {
@@ -373,15 +386,15 @@ internal fun SleepTimerBottomSheet(
             Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp)) {
                 Text(
                     text = if (isEndOfTrack) "Playback will pause at the end of this track" else "Playback will pause in ${formatMs(remaining)}",
-                    color = SheetSubtle, fontSize = 13.sp
+                    color = palette.subtleText, fontSize = 13.sp
                 )
             }
-            SheetItem(Icons.Default.Close, "Turn Off Timer") { onCancel(); onDismiss() }
+            SheetItem(modularIcon(Icons.Default.Close, Icons.Outlined.Close), "Turn Off Timer") { onCancel(); onDismiss() }
         } else {
             SLEEP_TIMER_OPTIONS.forEach { minutes ->
-                SheetItem(Icons.Default.Timer, "$minutes minutes") { onSelectMinutes(minutes); onDismiss() }
+                SheetItem(modularIcon(Icons.Default.Timer, Icons.Outlined.Timer), "$minutes minutes") { onSelectMinutes(minutes); onDismiss() }
             }
-            SheetItem(Icons.Default.Timer, "End of track") { onSelectEndOfTrack(); onDismiss() }
+            SheetItem(modularIcon(Icons.Default.Timer, Icons.Outlined.Timer), "End of track") { onSelectEndOfTrack(); onDismiss() }
         }
         Spacer(modifier = Modifier.height(8.dp))
     }
@@ -399,47 +412,56 @@ internal fun SpeedPitchBottomSheet(
     onReset: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    val palette = LocalAppPalette.current
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = SheetBg,
-        contentColor = SheetFg,
+        containerColor = palette.surface,
+        contentColor = palette.onSurface,
         dragHandle = null
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Speed & Pitch", color = SheetFg, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, modifier = Modifier.weight(1f))
-            TextButton(onClick = onReset) { Text("Reset", color = SheetFg, fontSize = 13.sp) }
+            Text("Speed & Pitch", color = palette.onSurface, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, modifier = Modifier.weight(1f))
+            TextButton(onClick = onReset) { Text("Reset", color = palette.onSurface, fontSize = 13.sp) }
         }
-        HorizontalDivider(color = SheetBorder)
+        HorizontalDivider(color = palette.border)
 
         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
-            Text("Speed", color = SheetSubtle, fontSize = 12.sp)
+            Text("Speed", color = palette.subtleText, fontSize = 12.sp)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Slider(
                     value = speed,
                     onValueChange = onSpeedChange,
                     valueRange = 0.5f..2f,
                     modifier = Modifier.weight(1f),
-                    colors = SliderDefaults.colors(thumbColor = SheetFg, activeTrackColor = SheetFg, inactiveTrackColor = SheetBorder)
+                    colors = SliderDefaults.colors(
+                        thumbColor = palette.activeIndicatorColor,
+                        activeTrackColor = palette.activeIndicatorColor,
+                        inactiveTrackColor = palette.border
+                    )
                 )
-                Text("%.2fx".format(speed), color = SheetFg, fontSize = 13.sp, modifier = Modifier.width(52.dp))
+                Text("%.2fx".format(speed), color = palette.onSurface, fontSize = 13.sp, modifier = Modifier.width(52.dp))
             }
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            Text("Pitch", color = SheetSubtle, fontSize = 12.sp)
+            Text("Pitch", color = palette.subtleText, fontSize = 12.sp)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Slider(
                     value = pitch,
                     onValueChange = onPitchChange,
                     valueRange = 0.5f..2f,
                     modifier = Modifier.weight(1f),
-                    colors = SliderDefaults.colors(thumbColor = SheetFg, activeTrackColor = SheetFg, inactiveTrackColor = SheetBorder)
+                    colors = SliderDefaults.colors(
+                        thumbColor = palette.activeIndicatorColor,
+                        activeTrackColor = palette.activeIndicatorColor,
+                        inactiveTrackColor = palette.border
+                    )
                 )
-                Text("%.2fx".format(pitch), color = SheetFg, fontSize = 13.sp, modifier = Modifier.width(52.dp))
+                Text("%.2fx".format(pitch), color = palette.onSurface, fontSize = 13.sp, modifier = Modifier.width(52.dp))
             }
         }
         Spacer(modifier = Modifier.height(16.dp))
@@ -456,6 +478,7 @@ internal fun EqualizerBottomSheet(
     onSetEnabled: (Boolean) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val palette = LocalAppPalette.current
     var isLoading by remember { mutableStateOf(true) }
     var state by remember { mutableStateOf<EqualizerState?>(null) }
     var levels by remember { mutableStateOf<List<Int>>(emptyList()) }
@@ -472,34 +495,37 @@ internal fun EqualizerBottomSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = SheetBg,
-        contentColor = SheetFg,
+        containerColor = palette.surface,
+        contentColor = palette.onSurface,
         dragHandle = null
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Equalizer", color = SheetFg, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, modifier = Modifier.weight(1f))
+            Text("Equalizer", color = palette.onSurface, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, modifier = Modifier.weight(1f))
             if (state != null) {
                 Switch(
                     checked = enabled,
                     onCheckedChange = { enabled = it; onSetEnabled(it) },
-                    colors = SwitchDefaults.colors(checkedThumbColor = SheetFg, checkedTrackColor = SheetSubtle)
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = palette.onSurface,
+                        checkedTrackColor = if (palette.isModular) palette.accent else palette.subtleText
+                    )
                 )
             }
         }
-        HorizontalDivider(color = SheetBorder)
+        HorizontalDivider(color = palette.border)
 
         Box(
             modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp).padding(20.dp),
             contentAlignment = if (isLoading || state == null) Alignment.Center else Alignment.TopStart
         ) {
             when {
-                isLoading -> CircularProgressIndicator(color = SheetFg, strokeWidth = 2.dp, modifier = Modifier.size(28.dp))
+                isLoading -> CircularProgressIndicator(color = palette.onSurface, strokeWidth = 2.dp, modifier = Modifier.size(28.dp))
                 state == null -> Text(
                     "Equalizer not available. Start playing a track first.",
-                    color = SheetSubtle, fontSize = 13.sp, textAlign = TextAlign.Center
+                    color = palette.subtleText, fontSize = 13.sp, textAlign = TextAlign.Center
                 )
                 else -> {
                     val eq = state!!
@@ -508,7 +534,7 @@ internal fun EqualizerBottomSheet(
                             val level = levels.getOrElse(index) { 0 }
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
-                                    formatFreqLabel(freqHz), color = SheetSubtle, fontSize = 11.sp,
+                                    formatFreqLabel(freqHz), color = palette.subtleText, fontSize = 11.sp,
                                     modifier = Modifier.width(48.dp)
                                 )
                                 Slider(
@@ -520,10 +546,14 @@ internal fun EqualizerBottomSheet(
                                     valueRange = eq.minLevel.toFloat()..eq.maxLevel.toFloat(),
                                     enabled = enabled,
                                     modifier = Modifier.weight(1f),
-                                    colors = SliderDefaults.colors(thumbColor = SheetFg, activeTrackColor = SheetFg, inactiveTrackColor = SheetBorder)
+                                    colors = SliderDefaults.colors(
+                                        thumbColor = palette.activeIndicatorColor,
+                                        activeTrackColor = palette.activeIndicatorColor,
+                                        inactiveTrackColor = palette.border
+                                    )
                                 )
                                 Text(
-                                    "%.1fdB".format(level / 100f), color = SheetFg, fontSize = 12.sp,
+                                    "%.1fdB".format(level / 100f), color = palette.onSurface, fontSize = 12.sp,
                                     modifier = Modifier.width(56.dp), textAlign = TextAlign.End
                                 )
                             }
@@ -543,9 +573,10 @@ private fun formatFreqLabel(hz: Int): String =
 
 @Composable
 private fun SheetTitle(text: String) {
+    val palette = LocalAppPalette.current
     Text(
         text = text,
-        color = SheetFg,
+        color = palette.onSurface,
         fontWeight = FontWeight.SemiBold,
         fontSize = 15.sp,
         modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp)
@@ -554,9 +585,10 @@ private fun SheetTitle(text: String) {
 
 @Composable
 private fun SheetSectionLabel(text: String) {
+    val palette = LocalAppPalette.current
     Text(
         text = text,
-        color = SheetSubtle,
+        color = palette.subtleText,
         fontSize = 11.sp,
         fontWeight = FontWeight.Medium,
         modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)
@@ -565,6 +597,7 @@ private fun SheetSectionLabel(text: String) {
 
 @Composable
 private fun SheetItem(icon: ImageVector, label: String, subtitle: String? = null, onClick: () -> Unit) {
+    val palette = LocalAppPalette.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -572,12 +605,12 @@ private fun SheetItem(icon: ImageVector, label: String, subtitle: String? = null
             .padding(horizontal = 20.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(icon, contentDescription = null, tint = SheetFg, modifier = Modifier.size(20.dp))
+        Icon(icon, contentDescription = null, tint = palette.onSurface, modifier = Modifier.size(20.dp))
         Spacer(modifier = Modifier.width(16.dp))
         Column {
-            Text(label, color = SheetFg, fontSize = 14.sp)
+            Text(label, color = palette.onSurface, fontSize = 14.sp)
             if (subtitle != null) {
-                Text(subtitle, color = SheetSubtle, fontSize = 12.sp)
+                Text(subtitle, color = palette.subtleText, fontSize = 12.sp)
             }
         }
     }
@@ -585,12 +618,13 @@ private fun SheetItem(icon: ImageVector, label: String, subtitle: String? = null
 
 @Composable
 private fun InfoRow(label: String, value: String) {
+    val palette = LocalAppPalette.current
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp)) {
-        Text(label, color = SheetSubtle, fontSize = 11.sp)
+        Text(label, color = palette.subtleText, fontSize = 11.sp)
         Spacer(modifier = Modifier.height(2.dp))
-        Text(value, color = SheetFg, fontSize = 14.sp)
+        Text(value, color = palette.onSurface, fontSize = 14.sp)
     }
-    HorizontalDivider(color = SheetBorder, modifier = Modifier.padding(horizontal = 20.dp))
+    HorizontalDivider(color = palette.border, modifier = Modifier.padding(horizontal = 20.dp))
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

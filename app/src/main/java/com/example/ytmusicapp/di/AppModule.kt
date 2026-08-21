@@ -12,6 +12,7 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import okhttp3.OkHttpClient
+import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "user_prefs")
@@ -35,7 +36,9 @@ object AppModule {
             AppDatabase.MIGRATION_1_2,
             AppDatabase.MIGRATION_2_3,
             AppDatabase.MIGRATION_3_4,
-            AppDatabase.MIGRATION_4_5
+            AppDatabase.MIGRATION_4_5,
+            AppDatabase.MIGRATION_5_6,
+            AppDatabase.MIGRATION_6_7
         )
         .build()
 
@@ -57,6 +60,8 @@ object AppModule {
     @Provides @Singleton fun provideSuppressionDao(db: AppDatabase) = db.suppressionDao()
     @Provides @Singleton fun provideSessionPairDao(db: AppDatabase) = db.sessionPairDao()
     @Provides @Singleton fun provideShelfImpressionDao(db: AppDatabase) = db.shelfImpressionDao()
+    @Provides @Singleton fun providePlaybackPositionDao(db: AppDatabase) = db.playbackPositionDao()
+    @Provides @Singleton fun provideMusicBrainzDao(db: AppDatabase) = db.musicBrainzDao()
 
     // ── Other ─────────────────────────────────────────────────────────────────
 
@@ -68,5 +73,13 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideOkHttp(): OkHttpClient = OkHttpClient.Builder().build()
+    fun provideOkHttp(): OkHttpClient = OkHttpClient.Builder()
+        // OkHttp's defaults (10s connect/read/write) are tuned for a decent connection — on a
+        // genuinely slow link (e.g. ~512kbps) a normal, still-progressing response can take
+        // longer than that to finish downloading and would otherwise time out and look
+        // indistinguishable from a real failure. Generous but still bounded.
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .writeTimeout(15, TimeUnit.SECONDS)
+        .build()
 }

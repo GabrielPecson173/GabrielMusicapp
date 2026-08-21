@@ -23,9 +23,13 @@ import com.example.ytmusicapp.data.db.entity.*
         TrackEmbeddingEntity::class,
         SuppressionEntity::class,
         SessionPairEntity::class,
-        ShelfImpressionEntity::class
+        ShelfImpressionEntity::class,
+        PlaybackPositionEntity::class,
+        MbArtistResolutionEntity::class,
+        MbAlbumEntity::class,
+        MbAlbumTrackEntity::class
     ],
-    version = 5,
+    version = 7,
     exportSchema = false
 )
 @TypeConverters(VectorTypeConverter::class)
@@ -47,6 +51,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun suppressionDao(): SuppressionDao
     abstract fun sessionPairDao(): SessionPairDao
     abstract fun shelfImpressionDao(): ShelfImpressionDao
+    abstract fun playbackPositionDao(): PlaybackPositionDao
+    abstract fun musicBrainzDao(): MusicBrainzDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -151,6 +157,43 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL(
                     "ALTER TABLE downloads ADD COLUMN thumbnailUrl TEXT NOT NULL DEFAULT ''"
                 )
+            }
+        }
+
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""CREATE TABLE IF NOT EXISTS playback_positions (
+                    videoId TEXT NOT NULL PRIMARY KEY,
+                    positionMs INTEGER NOT NULL,
+                    updatedAtMs INTEGER NOT NULL)""")
+            }
+        }
+
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""CREATE TABLE IF NOT EXISTS mb_artist_resolution (
+                    artistKey TEXT NOT NULL PRIMARY KEY,
+                    artistMbid TEXT,
+                    resolvedAtMs INTEGER NOT NULL)""")
+
+                db.execSQL("""CREATE TABLE IF NOT EXISTS mb_albums (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    artistKey TEXT NOT NULL,
+                    artistName TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    year INTEGER,
+                    resolvedAtMs INTEGER NOT NULL)""")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_mb_albums_artistKey ON mb_albums(artistKey)")
+
+                db.execSQL("""CREATE TABLE IF NOT EXISTS mb_album_tracks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    albumId TEXT NOT NULL,
+                    trackNumber INTEGER NOT NULL,
+                    title TEXT NOT NULL,
+                    durationMs INTEGER NOT NULL,
+                    matchedVideoId TEXT,
+                    matchedThumbnailUrl TEXT)""")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_mb_album_tracks_albumId ON mb_album_tracks(albumId)")
             }
         }
     }

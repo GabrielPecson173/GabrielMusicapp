@@ -4,5 +4,10 @@ data class Artist(
     val id: String,
     val name: String,
     val thumbnailUrl: String,
-    val albums: List<Album> = emptyList()
+    val songCount: Int = 0,
+    val popular: List<Track> = emptyList(),
+    val popularityRanked: List<Track> = emptyList(),
+    val albums: List<Album> = emptyList(),
+    val singles: List<Track> = emptyList(),
+    val allSongs: List<Track> = emptyList()
 )

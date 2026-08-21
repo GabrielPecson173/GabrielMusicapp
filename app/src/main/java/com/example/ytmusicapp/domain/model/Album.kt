@@ -5,6 +5,7 @@ data class Album(
     val title: String,
     val artist: String,
     val thumbnailUrl: String,
-    val year: Int,
-    val tracks: List<Track> = emptyList()
+    val year: Int?,
+    val tracks: List<Track> = emptyList(),
+    val isLoading: Boolean = false
 )

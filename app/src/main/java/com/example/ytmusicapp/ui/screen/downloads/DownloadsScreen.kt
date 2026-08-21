@@ -40,6 +40,7 @@ import com.example.ytmusicapp.ui.screen.player.PlayerViewModel
 @Composable
 fun DownloadsScreen(
     onTrackClick: (String) -> Unit,
+    onArtistClick: (String) -> Unit = {},
     playerViewModel: PlayerViewModel,
     viewModel: DownloadsViewModel = hiltViewModel()
 ) {
@@ -94,6 +95,7 @@ fun DownloadsScreen(
                                 trailingIcon = Icons.Default.Close,
                                 trailingDescription = "Cancel",
                                 onTrailingClick = { viewModel.cancel(download.trackId) },
+                                onArtistClick = onArtistClick,
                                 modifier = Modifier.fillMaxWidth()
                             )
                         }
@@ -115,6 +117,7 @@ fun DownloadsScreen(
                                 trailingIcon = Icons.Default.Refresh,
                                 trailingDescription = "Retry",
                                 onTrailingClick = { viewModel.retry(download) },
+                                onArtistClick = onArtistClick,
                                 modifier = Modifier.fillMaxWidth()
                             )
                         }
@@ -136,6 +139,7 @@ fun DownloadsScreen(
                                 trailingIcon = Icons.Default.Delete,
                                 trailingDescription = "Remove",
                                 onTrailingClick = { viewModel.remove(download.trackId) },
+                                onArtistClick = onArtistClick,
                                 modifier = Modifier.fillMaxWidth()
                             )
                         }
@@ -153,6 +157,7 @@ private fun DownloadItem(
     trailingIcon: ImageVector,
     trailingDescription: String,
     onTrailingClick: () -> Unit,
+    onArtistClick: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Row(
@@ -176,7 +181,8 @@ private fun DownloadItem(
                 text = download.artist,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1
+                maxLines = 1,
+                modifier = Modifier.clickable { onArtistClick(download.artist) }
             )
             Text(
                 text = download.status,

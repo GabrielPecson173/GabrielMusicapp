@@ -11,6 +11,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.outlined.Pause
+import androidx.compose.material.icons.outlined.PlayArrow
+import androidx.compose.material.icons.outlined.SkipNext
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -24,6 +27,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.example.ytmusicapp.domain.model.Track
+import com.example.ytmusicapp.ui.theme.modularIcon
 
 @Composable
 fun MiniPlayer(
@@ -33,6 +37,7 @@ fun MiniPlayer(
     onPlayPause: () -> Unit,
     onSkipNext: () -> Unit,
     onExpand: () -> Unit,
+    onArtistClick: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Surface(
@@ -78,21 +83,24 @@ fun MiniPlayer(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.clickable { onArtistClick(track.artist) }
                     )
                 }
 
                 Row {
                     IconButton(onClick = onPlayPause) {
                         Icon(
-                            imageVector = if (isPlaying) Icons.Default.Pause
-                            else Icons.Default.PlayArrow,
+                            imageVector = modularIcon(
+                                if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                if (isPlaying) Icons.Outlined.Pause else Icons.Outlined.PlayArrow
+                            ),
                             contentDescription = if (isPlaying) "Pause" else "Play"
                         )
                     }
                     IconButton(onClick = onSkipNext) {
                         Icon(
-                            imageVector = Icons.Default.SkipNext,
+                            imageVector = modularIcon(Icons.Default.SkipNext, Icons.Outlined.SkipNext),
                             contentDescription = "Skip Next"
                         )
                     }

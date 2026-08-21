@@ -11,6 +11,9 @@ import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
+import com.example.ytmusicapp.data.datastore.AppSettings
+import com.example.ytmusicapp.data.datastore.DefaultRepeatMode
+import com.example.ytmusicapp.data.datastore.UserPreferencesDataStore
 import com.example.ytmusicapp.data.repository.DownloadRepository
 import com.example.ytmusicapp.data.repository.HomeFeedRepository
 import com.example.ytmusicapp.data.repository.LyricsRepository
@@ -90,14 +93,18 @@ class PlayerViewModel @Inject constructor(
     private val lyricsRepository: LyricsRepository,
     private val downloadRepository: DownloadRepository,
     private val playbackCacheProvider: PlaybackCacheProvider,
-    private val eventTracker: EventTracker
+    private val eventTracker: EventTracker,
+    private val userPreferencesDataStore: UserPreferencesDataStore
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(PlayerUiState())
     val uiState: StateFlow<PlayerUiState> = _uiState.asStateFlow()
 
+    private data class PendingLoad(val videoId: String, val autoPlay: Boolean, val seekToMs: Long)
+
     private var mediaController: MediaController? = null
-    private var pendingTrackId: String? = null
+    private var pendingLoad: PendingLoad? = null
+    private var settings: AppSettings = AppSettings()
     private var currentlyPlayingId: String? = null
     private var isGeneratingQueue = false
     private var hasActiveSession = false
@@ -112,6 +119,62 @@ class PlayerViewModel @Inject constructor(
     init {
         startPositionUpdater()
         observePersistedQueue()
+        observeSettings()
+        restoreLastSessionIfEnabled()
+    }
+
+    private fun observeSettings() {
+        viewModelScope.launch {
+            userPreferencesDataStore.settings.collect { newSettings ->
+                val previous = settings
+                settings = newSettings
+                if (previous.volumeNormalization != newSettings.volumeNormalization) {
+                    setVolumeNormalization(newSettings.volumeNormalization)
+                }
+            }
+        }
+    }
+
+    /** Restores the last-played track, queue, position, shuffle and repeat state on cold start. */
+    private fun restoreLastSessionIfEnabled() {
+        viewModelScope.launch {
+            val s = userPreferencesDataStore.settings.first()
+            _uiState.value = _uiState.value.copy(
+                isShuffle  = s.defaultShuffle,
+                repeatMode = s.defaultRepeatMode.toPlayerRepeatMode()
+            )
+            mediaController?.repeatMode =
+                if (_uiState.value.repeatMode == RepeatMode.ONE) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+
+            if (!s.restorePlayerState) return@launch
+            // Filters out corrupted/blank entries that could otherwise be fed straight into
+            // loadTrack() on every cold start with no user action to recover from.
+            val tracks = queueRepository.getQueue().filter { it.id.isNotBlank() }
+            if (tracks.isEmpty()) return@launch
+            val current = queueRepository.getCurrentTrack()?.takeIf { it.id.isNotBlank() } ?: tracks.first()
+            val index = tracks.indexOfFirst { it.id == current.id }.coerceAtLeast(0)
+
+            val rawSavedMs = if (s.rememberPosition) recommendationRepository.getPlaybackPosition(current.id) else 0L
+            val savedMs = if (rawSavedMs >= MIN_RESTORE_POSITION_MS &&
+                !(current.durationMs > 0L && rawSavedMs.toFloat() / current.durationMs >= COMPLETION_THRESHOLD)
+            ) rawSavedMs else 0L
+
+            hasActiveSession = true
+            _uiState.value = _uiState.value.copy(
+                track      = current,
+                queue      = tracks,
+                queueIndex = index,
+                positionMs = savedMs,
+                durationMs = current.durationMs
+            )
+            loadTrack(current.id, autoPlay = false, seekToMs = savedMs)
+        }
+    }
+
+    private fun DefaultRepeatMode.toPlayerRepeatMode(): RepeatMode = when (this) {
+        DefaultRepeatMode.OFF -> RepeatMode.NONE
+        DefaultRepeatMode.ALL -> RepeatMode.ALL
+        DefaultRepeatMode.ONE -> RepeatMode.ONE
     }
 
     fun showSheet(sheet: PlayerSheet)  { _uiState.value = _uiState.value.copy(activeSheet = sheet) }
@@ -332,6 +395,7 @@ class PlayerViewModel @Inject constructor(
     }
 
     private fun persistPosition(positionMs: Long) {
+        if (!settings.rememberPosition) return
         val videoId  = currentlyPlayingId ?: return
         val duration = _uiState.value.durationMs
         if (duration > 0L && positionMs.toFloat() / duration >= COMPLETION_THRESHOLD) return
@@ -376,7 +440,14 @@ class PlayerViewModel @Inject constructor(
                 onTrackLooped()
             }
         })
-        pendingTrackId?.let { id -> pendingTrackId = null; loadTrack(id) }
+        viewModelScope.launch { setVolumeNormalization(userPreferencesDataStore.settings.first().volumeNormalization) }
+        pendingLoad?.let { pl -> pendingLoad = null; loadTrack(pl.videoId, pl.autoPlay, pl.seekToMs) }
+    }
+
+    fun setVolumeNormalization(enabled: Boolean) {
+        val controller = mediaController ?: return
+        val args = Bundle().apply { putBoolean(AudioPlaybackService.EXTRA_NORMALIZATION_ENABLED, enabled) }
+        controller.sendCustomCommand(SessionCommand(AudioPlaybackService.CMD_SET_NORMALIZATION_ENABLED, Bundle.EMPTY), args)
     }
 
     private fun onTrackLooped() {
@@ -398,6 +469,7 @@ class PlayerViewModel @Inject constructor(
     }
 
     private fun restoreSavedPosition(durationMs: Long) {
+        if (!settings.rememberPosition) return
         val videoId = currentlyPlayingId ?: return
         viewModelScope.launch {
             val savedMs = recommendationRepository.getPlaybackPosition(videoId)
@@ -418,8 +490,8 @@ class PlayerViewModel @Inject constructor(
         viewModelScope.launch { queueRepository.replaceQueue(tracks, startIndex) }
     }
 
-    fun loadTrack(videoId: String) {
-        if (mediaController == null) { pendingTrackId = videoId; return }
+    fun loadTrack(videoId: String, autoPlay: Boolean = true, seekToMs: Long = 0L) {
+        if (mediaController == null) { pendingLoad = PendingLoad(videoId, autoPlay, seekToMs); return }
         if (currentlyPlayingId == videoId) return
         prefetchJob?.cancel()
         playbackCacheProvider.cancelPrefetch()
@@ -427,7 +499,9 @@ class PlayerViewModel @Inject constructor(
             currentlyPlayingId = videoId
             trackStartMs = System.currentTimeMillis()
             positionSaveTicker = 0
-            hasRestoredPosition = false
+            // An explicit seekToMs (restore path) already applies the saved position below —
+            // skip the STATE_READY auto-restore so it isn't looked up and applied a second time.
+            hasRestoredPosition = seekToMs > 0L
             _uiState.value = _uiState.value.copy(
                 isLoading = true, error = null, streamInfo = null,
                 lyrics = null, lyricsError = null, isLyricsLoading = false
@@ -445,12 +519,14 @@ class PlayerViewModel @Inject constructor(
                 mediaController?.clearMediaItems()
                 mediaController?.setMediaItem(mediaItem)
                 mediaController?.prepare()
-                mediaController?.play()
+                if (seekToMs > 0L) mediaController?.seekTo(seekToMs)
+                if (autoPlay) mediaController?.play()
                 _uiState.value = _uiState.value.copy(
                     streamInfo = streamInfo,
-                    durationMs = streamInfo?.durationMs ?: 0L,
+                    durationMs = streamInfo?.durationMs ?: (if (seekToMs > 0L) _uiState.value.durationMs else 0L),
+                    positionMs = if (seekToMs > 0L) seekToMs else _uiState.value.positionMs,
                     isLoading  = false,
-                    isPlaying  = true
+                    isPlaying  = autoPlay
                 )
                 viewModelScope.launch {
                     try { recommendationRepository.fetchAndIngestRelatedTracksBulk(videoId); homeFeedRepository.refresh() }
@@ -458,6 +534,7 @@ class PlayerViewModel @Inject constructor(
                 }
                 if (_uiState.value.track != null && _uiState.value.queue.size <= 3) fetchAutoQueue()
                 prefetchNextTrack()
+                if (autoPlay && settings.lyricsAutoOpen) onLyrics()
             } catch (e: Exception) {
                 currentlyPlayingId = null
                 _uiState.value = _uiState.value.copy(isLoading = false, error = e.message)
@@ -485,6 +562,7 @@ class PlayerViewModel @Inject constructor(
     }
 
     private fun fetchAutoQueue() {
+        if (!settings.autoplayEnabled) return
         val track = _uiState.value.track ?: return
         val mode  = _uiState.value.queueMode
         viewModelScope.launch {

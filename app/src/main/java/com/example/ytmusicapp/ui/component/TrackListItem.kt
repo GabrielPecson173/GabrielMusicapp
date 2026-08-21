@@ -1,36 +1,66 @@
 package com.example.ytmusicapp.ui.component
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.example.ytmusicapp.domain.model.Track
+import com.example.ytmusicapp.ui.theme.LocalAppPalette
+import com.example.ytmusicapp.ui.theme.LocalCompactMode
 
 @Composable
 fun TrackListItem(
     track: Track,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onArtistClick: (String) -> Unit = {},
+    index: Int? = null,
+    isActive: Boolean = false
 ) {
+    val compact = LocalCompactMode.current
+    val palette = LocalAppPalette.current
     Row(
         modifier = modifier
+            .fillMaxWidth()
+            .then(
+                if (isActive)
+                    Modifier
+                        .background(palette.accent.copy(alpha = 0.16f), RoundedCornerShape(10.dp))
+                else Modifier
+            )
             .clickable { onClick() }
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 16.dp, vertical = if (compact) 4.dp else 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        if (index != null) {
+            Text(
+                text = "%02d".format(index),
+                style = MaterialTheme.typography.bodySmall,
+                color = if (isActive) palette.accent else palette.subtleText,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.width(28.dp)
+            )
+        }
+
         AsyncImage(
             model = track.thumbnailUrl,
             contentDescription = null,
-            modifier = Modifier.size(48.dp)
+            modifier = Modifier.size(if (compact) 40.dp else 48.dp)
         )
 
         Column(
@@ -41,6 +71,8 @@ fun TrackListItem(
             Text(
                 text = track.title,
                 style = MaterialTheme.typography.bodyLarge,
+                color = if (isActive) palette.accent else MaterialTheme.colorScheme.onSurface,
+                fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -49,7 +81,8 @@ fun TrackListItem(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.clickable { onArtistClick(track.artist) }
             )
         }
 

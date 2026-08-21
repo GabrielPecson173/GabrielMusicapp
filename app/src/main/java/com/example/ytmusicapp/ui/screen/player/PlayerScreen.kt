@@ -1,6 +1,7 @@
 package com.example.ytmusicapp.ui.screen.player
 
 import androidx.annotation.OptIn
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -34,6 +35,20 @@ import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.VolumeDown
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.IosShare
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.MoreHoriz
+import androidx.compose.material.icons.outlined.Pause
+import androidx.compose.material.icons.outlined.PlayArrow
+import androidx.compose.material.icons.outlined.PlaylistAdd
+import androidx.compose.material.icons.outlined.QueueMusic
+import androidx.compose.material.icons.outlined.Repeat
+import androidx.compose.material.icons.outlined.RepeatOne
+import androidx.compose.material.icons.outlined.Shuffle
+import androidx.compose.material.icons.outlined.SkipNext
+import androidx.compose.material.icons.outlined.SkipPrevious
+import androidx.compose.material.icons.outlined.VolumeDown
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -47,20 +62,21 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.util.UnstableApi
-
-private val BgDeep      = Color(0xFF0E0E0E)
-private val Surface     = Color(0xFF1C1C1C)
-private val OnBg        = Color(0xFFEEEEEE)
-private val Subtle      = Color(0xFF666666)
-private val BorderColor = Color(0xFF333333)
+import com.example.ytmusicapp.ui.theme.AppPalette
+import com.example.ytmusicapp.ui.theme.LocalAppPalette
+import com.example.ytmusicapp.ui.theme.activeIndicatorColor
+import com.example.ytmusicapp.ui.theme.modularIcon
 
 @OptIn(UnstableApi::class)
 @ExperimentalMaterial3Api
@@ -68,16 +84,18 @@ private val BorderColor = Color(0xFF333333)
 fun PlayerScreen(
     trackId: String,
     onBack: () -> Unit,
-    viewModel: PlayerViewModel
+    viewModel: PlayerViewModel,
+    onArtistClick: (String) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val palette = LocalAppPalette.current
 
     LaunchedEffect(trackId) { viewModel.loadTrack(trackId) }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(BgDeep)
+            .background(palette.background)
             .systemBarsPadding()
     ) {
         Column(
@@ -88,7 +106,8 @@ fun PlayerScreen(
                 title      = uiState.track?.title,
                 artist     = uiState.track?.artist,
                 onBack     = onBack,
-                onShare    = { viewModel.showSheet(PlayerSheet.SHARE) }
+                onShare    = { viewModel.showSheet(PlayerSheet.SHARE) },
+                onArtistClick = onArtistClick
             )
 
             SeekRow(
@@ -105,7 +124,7 @@ fun PlayerScreen(
                 contentAlignment = Alignment.Center
             ) {
                 when {
-                    uiState.isLoading  -> CircularProgressIndicator(color = OnBg, strokeWidth = 2.dp)
+                    uiState.isLoading  -> CircularProgressIndicator(color = palette.onBackground, strokeWidth = 2.dp)
                     uiState.error != null -> Text(
                         text = uiState.error!!,
                         color = Color(0xFFCF6679),
@@ -113,11 +132,16 @@ fun PlayerScreen(
                         textAlign = TextAlign.Center,
                         modifier = Modifier.padding(24.dp)
                     )
-                    else -> VinylPlayerView(
-                        albumArtUrl = uiState.track?.thumbnailUrl,
-                        isPlaying   = uiState.isPlaying,
-                        size        = 272.dp
-                    )
+                    else -> Box(contentAlignment = Alignment.Center) {
+                        if (palette.isModular) {
+                            ModularVinylRing(size = 300.dp, palette = palette)
+                        }
+                        VinylPlayerView(
+                            albumArtUrl = uiState.track?.thumbnailUrl,
+                            isPlaying   = uiState.isPlaying,
+                            size        = 272.dp
+                        )
+                    }
                 }
             }
 
@@ -218,8 +242,10 @@ private fun PlayerHeader(
     title: String?,
     artist: String?,
     onBack: () -> Unit,
-    onShare: () -> Unit
+    onShare: () -> Unit,
+    onArtistClick: (String) -> Unit = {}
 ) {
+    val palette = LocalAppPalette.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -227,8 +253,8 @@ private fun PlayerHeader(
         verticalAlignment = Alignment.CenterVertically
     ) {
         IconButton(onClick = onBack) {
-            Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Back",
-                tint = OnBg, modifier = Modifier.size(28.dp))
+            Icon(modularIcon(Icons.Default.KeyboardArrowDown, Icons.Outlined.KeyboardArrowDown), contentDescription = "Back",
+                tint = palette.onBackground, modifier = Modifier.size(28.dp))
         }
         Column(
             modifier = Modifier.weight(1f),
@@ -236,7 +262,7 @@ private fun PlayerHeader(
         ) {
             Text(
                 text = title ?: "···",
-                color = OnBg,
+                color = palette.onBackground,
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 15.sp,
                 maxLines = 1,
@@ -247,18 +273,38 @@ private fun PlayerHeader(
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = artist,
-                    color = Subtle,
+                    color = palette.subtleText,
                     fontSize = 12.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Center
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.clickable { onArtistClick(artist) }
                 )
             }
         }
         IconButton(onClick = onShare) {
-            Icon(Icons.Default.IosShare, contentDescription = "Share",
-                tint = OnBg, modifier = Modifier.size(22.dp))
+            Icon(modularIcon(Icons.Default.IosShare, Icons.Outlined.IosShare), contentDescription = "Share",
+                tint = palette.onBackground, modifier = Modifier.size(22.dp))
         }
+    }
+}
+
+// ── Modular decorative ring ────────────────────────────────────────────────────
+// Thin geometric ring + technical index mark around the vinyl — Modular-only accent,
+// per the theme's "circular framing / thin geometric rings" visual language.
+
+@Composable
+private fun ModularVinylRing(size: Dp, palette: AppPalette) {
+    Canvas(modifier = Modifier.size(size)) {
+        val strokeWidth = 1.5.dp.toPx()
+        val radius = this.size.minDimension / 2f
+        drawCircle(color = palette.border, radius = radius, style = Stroke(width = strokeWidth))
+        drawLine(
+            color = palette.accent,
+            start = Offset(this.size.width / 2f, 0f),
+            end   = Offset(this.size.width / 2f, strokeWidth * 5),
+            strokeWidth = strokeWidth * 2
+        )
     }
 }
 
@@ -266,22 +312,26 @@ private fun PlayerHeader(
 
 @Composable
 private fun SeekRow(positionMs: Long, durationMs: Long, onSeek: (Long) -> Unit) {
+    val palette = LocalAppPalette.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(formatMs(positionMs), color = Subtle, fontSize = 11.sp,
+        Text(formatMs(positionMs), color = palette.subtleText, fontSize = 11.sp,
             modifier = Modifier.width(36.dp), textAlign = TextAlign.Start)
         Slider(
             value = if (durationMs > 0L) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f,
             onValueChange = { fraction -> onSeek((fraction * durationMs).toLong()) },
             modifier = Modifier.weight(1f),
             colors = SliderDefaults.colors(
-                thumbColor = OnBg, activeTrackColor = OnBg, inactiveTrackColor = BorderColor)
+                thumbColor = palette.activeIndicatorColor,
+                activeTrackColor = palette.activeIndicatorColor,
+                inactiveTrackColor = palette.border
+            )
         )
-        Text(formatMs(durationMs), color = Subtle, fontSize = 11.sp,
+        Text(formatMs(durationMs), color = palette.subtleText, fontSize = 11.sp,
             modifier = Modifier.width(36.dp), textAlign = TextAlign.End)
     }
 }
@@ -300,6 +350,7 @@ private fun ActionRow(
     onToggleRepeat: () -> Unit,
     onToggleShuffle: () -> Unit
 ) {
+    val palette = LocalAppPalette.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -310,31 +361,34 @@ private fun ActionRow(
             Icon(
                 imageVector = if (isLiked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                 contentDescription = "Like",
-                tint = if (isLiked) Color(0xFFE05C7A) else Subtle,
+                tint = if (isLiked) Color(0xFFE05C7A) else palette.subtleText,
                 modifier = Modifier.size(22.dp)
             )
         }
         IconButton(onClick = onInfo) {
-            Icon(Icons.Default.Info, contentDescription = "Info", tint = Subtle, modifier = Modifier.size(22.dp))
+            Icon(modularIcon(Icons.Default.Info, Icons.Outlined.Info), contentDescription = "Info", tint = palette.subtleText, modifier = Modifier.size(22.dp))
         }
         IconButton(onClick = onAddToPlaylist) {
-            Icon(Icons.Default.PlaylistAdd, contentDescription = "Add to playlist", tint = Subtle, modifier = Modifier.size(22.dp))
+            Icon(modularIcon(Icons.Default.PlaylistAdd, Icons.Outlined.PlaylistAdd), contentDescription = "Add to playlist", tint = palette.subtleText, modifier = Modifier.size(22.dp))
         }
         IconButton(onClick = onMore) {
-            Icon(Icons.Default.MoreHoriz, contentDescription = "More", tint = Subtle, modifier = Modifier.size(22.dp))
+            Icon(modularIcon(Icons.Default.MoreHoriz, Icons.Outlined.MoreHoriz), contentDescription = "More", tint = palette.subtleText, modifier = Modifier.size(22.dp))
         }
         Spacer(modifier = Modifier.weight(1f))
         IconButton(onClick = onToggleRepeat) {
             Icon(
-                imageVector = if (repeatMode == RepeatMode.ONE) Icons.Default.RepeatOne else Icons.Default.Repeat,
+                imageVector = modularIcon(
+                    if (repeatMode == RepeatMode.ONE) Icons.Default.RepeatOne else Icons.Default.Repeat,
+                    if (repeatMode == RepeatMode.ONE) Icons.Outlined.RepeatOne else Icons.Outlined.Repeat
+                ),
                 contentDescription = "Repeat",
-                tint = if (repeatMode != RepeatMode.NONE) OnBg else Subtle,
+                tint = if (repeatMode != RepeatMode.NONE) palette.activeIndicatorColor else palette.subtleText,
                 modifier = Modifier.size(22.dp)
             )
         }
         IconButton(onClick = onToggleShuffle) {
-            Icon(Icons.Default.Shuffle, contentDescription = "Shuffle",
-                tint = if (isShuffle) OnBg else Subtle, modifier = Modifier.size(22.dp))
+            Icon(modularIcon(Icons.Default.Shuffle, Icons.Outlined.Shuffle), contentDescription = "Shuffle",
+                tint = if (isShuffle) palette.activeIndicatorColor else palette.subtleText, modifier = Modifier.size(22.dp))
         }
     }
 }
@@ -349,6 +403,7 @@ private fun TransportRow(
     onNext: () -> Unit,
     onQueue: () -> Unit
 ) {
+    val palette = LocalAppPalette.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -357,38 +412,52 @@ private fun TransportRow(
         verticalAlignment = Alignment.CenterVertically
     ) {
         IconButton(onClick = onQueue) {
-            Icon(Icons.Default.QueueMusic, contentDescription = "Queue",
-                tint = Subtle, modifier = Modifier.size(22.dp))
+            Icon(modularIcon(Icons.Default.QueueMusic, Icons.Outlined.QueueMusic), contentDescription = "Queue",
+                tint = palette.subtleText, modifier = Modifier.size(22.dp))
         }
         TransportButton(size = 52, onClick = onPrevious) {
-            Icon(Icons.Default.SkipPrevious, contentDescription = "Previous",
-                tint = OnBg, modifier = Modifier.size(24.dp))
+            Icon(modularIcon(Icons.Default.SkipPrevious, Icons.Outlined.SkipPrevious), contentDescription = "Previous",
+                tint = palette.onBackground, modifier = Modifier.size(24.dp))
         }
-        TransportButton(size = 62, onClick = onPlayPause) {
+        // The center play/pause button is the strongest visual emphasis point in Modular —
+        // filled with the accent color, like the reference's primary geometric focal shape.
+        TransportButton(size = 62, onClick = onPlayPause, emphasized = true) {
             Icon(
-                imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                imageVector = modularIcon(
+                    if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    if (isPlaying) Icons.Outlined.Pause else Icons.Outlined.PlayArrow
+                ),
                 contentDescription = if (isPlaying) "Pause" else "Play",
-                tint = OnBg, modifier = Modifier.size(30.dp)
+                tint = if (palette.isModular) palette.onAccent else palette.onBackground,
+                modifier = Modifier.size(30.dp)
             )
         }
         TransportButton(size = 52, onClick = onNext) {
-            Icon(Icons.Default.SkipNext, contentDescription = "Next",
-                tint = OnBg, modifier = Modifier.size(24.dp))
+            Icon(modularIcon(Icons.Default.SkipNext, Icons.Outlined.SkipNext), contentDescription = "Next",
+                tint = palette.onBackground, modifier = Modifier.size(24.dp))
         }
-        Icon(Icons.Default.VolumeDown, contentDescription = "Volume",
-            tint = Subtle, modifier = Modifier.size(22.dp))
+        Icon(modularIcon(Icons.Default.VolumeDown, Icons.Outlined.VolumeDown), contentDescription = "Volume",
+            tint = palette.subtleText, modifier = Modifier.size(22.dp))
     }
 }
 
 // ── Transport button ──────────────────────────────────────────────────────────
 
 @Composable
-private fun TransportButton(size: Int, onClick: () -> Unit, content: @Composable () -> Unit) {
+private fun TransportButton(
+    size: Int,
+    onClick: () -> Unit,
+    emphasized: Boolean = false,
+    content: @Composable () -> Unit
+) {
+    val palette = LocalAppPalette.current
+    val filled = emphasized && palette.isModular
     Box(
         modifier = Modifier
             .size(size.dp)
             .clip(CircleShape)
-            .border(1.dp, BorderColor, CircleShape)
+            .then(if (filled) Modifier.background(palette.accent) else Modifier)
+            .border(1.dp, palette.border, CircleShape)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) { content() }

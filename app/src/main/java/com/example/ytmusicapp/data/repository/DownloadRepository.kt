@@ -88,6 +88,11 @@ class DownloadRepository @Inject constructor(
     suspend fun updateStatus(trackId: String, status: String) =
         downloadDao.updateStatus(trackId, status)
 
+    suspend fun clearAllDownloads() {
+        val all = downloadDao.getAllDownloads().first()
+        all.forEach { remove(it.trackId) }
+    }
+
     companion object {
         const val STATUS_QUEUED = "QUEUED"
         const val STATUS_DOWNLOADING = "DOWNLOADING"

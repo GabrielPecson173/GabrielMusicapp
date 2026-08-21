@@ -8,6 +8,10 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.LibraryMusic
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -34,12 +38,17 @@ import androidx.navigation.toRoute
 import com.example.ytmusicapp.data.tracker.EventTracker
 import com.example.ytmusicapp.playback.AudioPlaybackService
 import com.example.ytmusicapp.ui.component.MiniPlayer
+import com.example.ytmusicapp.ui.screen.album.AlbumScreen
+import com.example.ytmusicapp.ui.screen.artist.ArtistScreen
+import com.example.ytmusicapp.ui.screen.artist.ArtistSectionScreen
 import com.example.ytmusicapp.ui.screen.downloads.DownloadsScreen
 import com.example.ytmusicapp.ui.screen.home.HomeScreen
 import com.example.ytmusicapp.ui.screen.library.LibraryScreen
 import com.example.ytmusicapp.ui.screen.player.PlayerScreen
 import com.example.ytmusicapp.ui.screen.player.PlayerViewModel
 import com.example.ytmusicapp.ui.screen.search.SearchScreen
+import com.example.ytmusicapp.ui.screen.settings.SettingsScreen
+import com.example.ytmusicapp.ui.theme.modularIcon
 import com.google.common.util.concurrent.MoreExecutors
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -53,14 +62,15 @@ class EventTrackerViewModel @Inject constructor(
 private data class BottomNavItem(
     val label: String,
     val icon: androidx.compose.ui.graphics.vector.ImageVector,
+    val outlinedIcon: androidx.compose.ui.graphics.vector.ImageVector,
     val screen: Screen
 )
 
 private val bottomNavItems = listOf(
-    BottomNavItem("Home",      Icons.Default.Home,         Screen.Home),
-    BottomNavItem("Search",    Icons.Default.Search,       Screen.Search),
-    BottomNavItem("Library",   Icons.Default.LibraryMusic, Screen.Library),
-    BottomNavItem("Downloads", Icons.Default.Download,     Screen.Downloads)
+    BottomNavItem("Home",      Icons.Default.Home,         Icons.Outlined.Home,         Screen.Home),
+    BottomNavItem("Search",    Icons.Default.Search,       Icons.Outlined.Search,       Screen.Search),
+    BottomNavItem("Library",   Icons.Default.LibraryMusic, Icons.Outlined.LibraryMusic, Screen.Library),
+    BottomNavItem("Downloads", Icons.Default.Download,     Icons.Outlined.Download,     Screen.Downloads)
 )
 
 @ExperimentalMaterial3Api
@@ -71,7 +81,10 @@ fun AppNavGraph() {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
 
-    val isPlayerScreen = currentDestination?.hasRoute(Screen.Player::class) == true
+    val isPlayerScreen = currentDestination?.hasRoute(Screen.Player::class) == true ||
+        currentDestination?.hasRoute(Screen.Artist::class) == true ||
+        currentDestination?.hasRoute(Screen.Album::class) == true ||
+        currentDestination?.hasRoute(Screen.ArtistSection::class) == true
 
     val playerViewModel: PlayerViewModel       = hiltViewModel()
     val etViewModel: EventTrackerViewModel     = hiltViewModel()
@@ -112,6 +125,9 @@ fun AppNavGraph() {
                                 navController.navigate(Screen.Player(track.id)) {
                                     launchSingleTop = true
                                 }
+                            },
+                            onArtistClick = { artist ->
+                                navController.navigate(Screen.Artist(artist))
                             }
                         )
                     }
@@ -128,7 +144,7 @@ fun AppNavGraph() {
                                         restoreState    = true
                                     }
                                 },
-                                icon  = { Icon(item.icon, contentDescription = item.label) },
+                                icon  = { Icon(modularIcon(item.icon, item.outlinedIcon), contentDescription = item.label) },
                                 label = { Text(item.label) }
                             )
                         }
@@ -149,6 +165,9 @@ fun AppNavGraph() {
                     onTrackClick    = { trackId ->
                         navController.navigate(Screen.Player(trackId))
                     },
+                    onArtistClick = { artist ->
+                        navController.navigate(Screen.Artist(artist))
+                    },
                     onSearchClick = {
                         navController.navigate(Screen.Search) {
                             popUpTo(navController.graph.findStartDestination().id) {
@@ -157,13 +176,17 @@ fun AppNavGraph() {
                             launchSingleTop = true
                             restoreState    = true
                         }
-                    }
+                    },
+                    onSettingsClick = { navController.navigate(Screen.Settings) }
                 )
             }
             composable<Screen.Search> {
                 SearchScreen(
                     onTrackClick    = { trackId ->
                         navController.navigate(Screen.Player(trackId))
+                    },
+                    onArtistClick = { artist ->
+                        navController.navigate(Screen.Artist(artist))
                     },
                     playerViewModel = playerViewModel,
                     eventTracker    = eventTracker
@@ -173,6 +196,9 @@ fun AppNavGraph() {
                 LibraryScreen(
                     onTrackClick = { trackId ->
                         navController.navigate(Screen.Player(trackId))
+                    },
+                    onArtistClick = { artist ->
+                        navController.navigate(Screen.Artist(artist))
                     }
                 )
             }
@@ -181,15 +207,74 @@ fun AppNavGraph() {
                     onTrackClick = { trackId ->
                         navController.navigate(Screen.Player(trackId))
                     },
+                    onArtistClick = { artist ->
+                        navController.navigate(Screen.Artist(artist))
+                    },
                     playerViewModel = playerViewModel
                 )
+            }
+            composable<Screen.Settings> {
+                SettingsScreen(onBack = { navController.popBackStack() })
             }
             composable<Screen.Player> { backStackEntry ->
                 val player: Screen.Player = backStackEntry.toRoute()
                 PlayerScreen(
                     trackId  = player.trackId,
                     onBack   = { navController.popBackStack() },
+                    onArtistClick = { artist ->
+                        navController.navigate(Screen.Artist(artist))
+                    },
                     viewModel = playerViewModel
+                )
+            }
+            composable<Screen.Artist> { backStackEntry ->
+                val args: Screen.Artist = backStackEntry.toRoute()
+                ArtistScreen(
+                    artistKey = args.artistKey,
+                    onBack    = { navController.popBackStack() },
+                    onTrackClick = { trackId ->
+                        navController.navigate(Screen.Player(trackId))
+                    },
+                    onArtistClick = { artist ->
+                        navController.navigate(Screen.Artist(artist))
+                    },
+                    onAlbumClick = { artistKey, albumName ->
+                        navController.navigate(Screen.Album(artistKey, albumName))
+                    },
+                    onExpandSection = { section ->
+                        navController.navigate(Screen.ArtistSection(args.artistKey, section))
+                    },
+                    playerViewModel = playerViewModel
+                )
+            }
+            composable<Screen.ArtistSection> { backStackEntry ->
+                val args: Screen.ArtistSection = backStackEntry.toRoute()
+                ArtistSectionScreen(
+                    artistKey = args.artistKey,
+                    section   = args.section,
+                    onBack    = { navController.popBackStack() },
+                    onTrackClick = { trackId ->
+                        navController.navigate(Screen.Player(trackId))
+                    },
+                    onArtistClick = { artist ->
+                        navController.navigate(Screen.Artist(artist))
+                    },
+                    playerViewModel = playerViewModel
+                )
+            }
+            composable<Screen.Album> { backStackEntry ->
+                val args: Screen.Album = backStackEntry.toRoute()
+                AlbumScreen(
+                    artistKey = args.artistKey,
+                    albumName = args.albumName,
+                    onBack    = { navController.popBackStack() },
+                    onTrackClick = { trackId ->
+                        navController.navigate(Screen.Player(trackId))
+                    },
+                    onArtistClick = { artist ->
+                        navController.navigate(Screen.Artist(artist))
+                    },
+                    playerViewModel = playerViewModel
                 )
             }
         }

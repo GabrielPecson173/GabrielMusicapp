@@ -2,6 +2,7 @@ package com.example.ytmusicapp.ui.screen.search
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.ytmusicapp.data.repository.ArtistRepository
 import com.example.ytmusicapp.data.tracker.EventTracker
 import com.example.ytmusicapp.domain.model.Track
 import com.example.ytmusicapp.domain.usecase.SearchMusicUseCase
@@ -19,6 +20,7 @@ import javax.inject.Inject
 data class SearchUiState(
     val query: String = "",
     val results: List<Track> = emptyList(),
+    val artistMatches: List<String> = emptyList(),
     val isLoading: Boolean = false,
     val error: String? = null
 )
@@ -27,6 +29,7 @@ data class SearchUiState(
 @HiltViewModel
 class SearchViewModel @Inject constructor(
     private val searchMusicUseCase: SearchMusicUseCase,
+    private val artistRepository: ArtistRepository,
     private val eventTracker: EventTracker
 ) : ViewModel() {
 
@@ -77,6 +80,10 @@ class SearchViewModel @Inject constructor(
                     error = e.message
                 )
             }
+        }
+        viewModelScope.launch {
+            val artists = runCatching { artistRepository.searchArtists(query) }.getOrDefault(emptyList())
+            _uiState.value = _uiState.value.copy(artistMatches = artists)
         }
     }
 }

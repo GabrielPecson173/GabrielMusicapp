@@ -7,6 +7,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.DownloadDone
+import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -31,6 +34,7 @@ import com.example.ytmusicapp.data.db.entity.DownloadEntity
 import com.example.ytmusicapp.data.repository.DownloadRepository
 import com.example.ytmusicapp.domain.model.Track
 import com.example.ytmusicapp.domain.usecase.DownloadTrackUseCase
+import com.example.ytmusicapp.ui.theme.modularIcon
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -107,7 +111,7 @@ fun DownloadStatusIndicator(
     ) {
         when (status) {
             DownloadUiStatus.NOT_DOWNLOADED -> Icon(
-                imageVector = Icons.Default.Download,
+                imageVector = modularIcon(Icons.Default.Download, Icons.Outlined.Download),
                 contentDescription = "Download",
                 tint = neutralColor,
                 modifier = Modifier.size(iconSize).clickable { viewModel.download(track) }
@@ -121,7 +125,7 @@ fun DownloadStatusIndicator(
 
             DownloadUiStatus.DOWNLOADED -> {
                 Icon(
-                    imageVector = Icons.Default.DownloadDone,
+                    imageVector = modularIcon(Icons.Default.DownloadDone, Icons.Outlined.DownloadDone),
                     contentDescription = "Downloaded — tap to manage",
                     tint = accentColor,
                     modifier = Modifier.size(iconSize).clickable { showManageMenu = true }
@@ -135,7 +139,7 @@ fun DownloadStatusIndicator(
             }
 
             DownloadUiStatus.FAILED -> Icon(
-                imageVector = Icons.Default.ErrorOutline,
+                imageVector = modularIcon(Icons.Default.ErrorOutline, Icons.Outlined.ErrorOutline),
                 contentDescription = "Download failed — tap to retry",
                 tint = errorColor,
                 modifier = Modifier.size(iconSize).clickable { viewModel.download(track) }

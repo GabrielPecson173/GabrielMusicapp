@@ -1,14 +1,19 @@
 package com.example.ytmusicapp.ui.screen.search
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -17,6 +22,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SearchBar
 import androidx.compose.material3.SearchBarDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -33,6 +39,7 @@ import com.example.ytmusicapp.ui.screen.player.PlayerViewModel
 @Composable
 fun SearchScreen(
     onTrackClick: (String) -> Unit,
+    onArtistClick: (String) -> Unit = {},
     playerViewModel: PlayerViewModel,
     eventTracker: EventTracker,
     viewModel: SearchViewModel = hiltViewModel()
@@ -78,7 +85,7 @@ fun SearchScreen(
                         modifier = Modifier.align(Alignment.Center).padding(16.dp)
                     )
                 }
-                uiState.results.isEmpty() && uiState.query.isNotEmpty() -> {
+                uiState.results.isEmpty() && uiState.artistMatches.isEmpty() && uiState.query.isNotEmpty() -> {
                     Text(
                         text = "No results found",
                         style = MaterialTheme.typography.bodyLarge,
@@ -95,6 +102,9 @@ fun SearchScreen(
                 }
                 else -> {
                     LazyColumn(modifier = Modifier.fillMaxSize()) {
+                        items(uiState.artistMatches, key = { "artist_$it" }) { artistName ->
+                            ArtistResultRow(name = artistName, onClick = { onArtistClick(artistName) })
+                        }
                         items(uiState.results) { track ->
                             TrackListItem(
                                 track = track,
@@ -104,12 +114,42 @@ fun SearchScreen(
                                     playerViewModel.setQueue(listOf(track), 0)
                                     onTrackClick(track.id)
                                 },
+                                onArtistClick = onArtistClick,
                                 modifier = Modifier.fillMaxWidth()
                             )
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun ArtistResultRow(name: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Surface(
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            modifier = Modifier.size(48.dp)
+        ) {
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                Icon(Icons.Default.Person, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        Column(modifier = Modifier.weight(1f).padding(horizontal = 12.dp)) {
+            Text(text = name, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                text = "Artist",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }

@@ -17,7 +17,27 @@ sealed class Screen {
     object Downloads : Screen()
 
     @Serializable
+    object Settings : Screen()
+
+    @Serializable
     data class Player(
         val trackId: String
+    ) : Screen()
+
+    @Serializable
+    data class Artist(
+        val artistKey: String
+    ) : Screen()
+
+    @Serializable
+    data class Album(
+        val artistKey: String,
+        val albumName: String
+    ) : Screen()
+
+    @Serializable
+    data class ArtistSection(
+        val artistKey: String,
+        val section: String
     ) : Screen()
 }
