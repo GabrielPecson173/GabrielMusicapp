@@ -38,8 +38,18 @@ object AppModule {
             AppDatabase.MIGRATION_3_4,
             AppDatabase.MIGRATION_4_5,
             AppDatabase.MIGRATION_5_6,
-            AppDatabase.MIGRATION_6_7
+            AppDatabase.MIGRATION_6_7,
+            AppDatabase.MIGRATION_7_8
         )
+        // Forward migrations above are exact and intentional — this does NOT weaken them.
+        // It only covers a genuine downgrade (an on-disk DB at a newer version than the
+        // currently-running app expects), which crashed hard with no migration path during
+        // active development/testing where an older build can land on a device after a newer
+        // one already created a later-version database. Safe here specifically because every
+        // table in this DB is a rebuildable local cache (recommendation candidates, play
+        // history, MusicBrainz cache, queue state) — never the sole copy of anything, so
+        // recreating it on a real downgrade loses nothing that can't be regenerated.
+        .fallbackToDestructiveMigrationOnDowngrade()
         .build()
 
     // ── Core DAOs ─────────────────────────────────────────────────────────────

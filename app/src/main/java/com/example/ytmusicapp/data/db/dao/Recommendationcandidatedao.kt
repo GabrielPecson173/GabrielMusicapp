@@ -25,6 +25,9 @@ interface RecommendationCandidateDao {
     @Query("SELECT * FROM recommendation_candidates WHERE videoId = :videoId LIMIT 1")
     suspend fun getByVideoId(videoId: String): RecommendationCandidateEntity?
 
+    @Query("SELECT * FROM recommendation_candidates WHERE videoId IN (:videoIds)")
+    suspend fun getByVideoIds(videoIds: List<String>): List<RecommendationCandidateEntity>
+
     @Query("SELECT * FROM recommendation_candidates WHERE isFavorite = 1")
     suspend fun getFavorites(): List<RecommendationCandidateEntity>
 

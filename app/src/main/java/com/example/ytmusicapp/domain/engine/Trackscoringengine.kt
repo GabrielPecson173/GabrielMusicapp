@@ -41,6 +41,37 @@ class TrackScoringEngine @Inject constructor() {
         val nowMs: Long = System.currentTimeMillis()
     )
 
+    // ── Batch scoring ─────────────────────────────────────────────────────────
+    // Shared by HomeFeedRepository (shelves) and SmartQueueEngine (queue/autoplay/radio) so both
+    // consumers of this engine build the same ScoringContext grouping the same way.
+
+    fun scoreAll(
+        candidates: List<RecommendationCandidateEntity>,
+        recentPlays: List<PlayEventEntity>,
+        recentSkips: List<SkipEventEntity>,
+        artistMap: Map<String, String>,
+        recentSearchTokens: List<String>,
+        nowMs: Long = System.currentTimeMillis()
+    ): Map<String, Float> {
+        val playsByVideoId  = recentPlays.groupBy { it.videoId }
+        val skipsByVideoId  = recentSkips.groupBy { it.videoId }
+        val playsByArtistId = recentPlays.groupBy { artistMap[it.videoId] ?: "" }
+        val skipsByArtistId = recentSkips.groupBy { artistMap[it.videoId] ?: "" }
+
+        return candidates.associate { candidate ->
+            val ctx = ScoringContext(
+                candidate          = candidate,
+                playEvents         = playsByVideoId[candidate.videoId] ?: emptyList(),
+                skipEvents         = skipsByVideoId[candidate.videoId] ?: emptyList(),
+                artistPlayEvents   = playsByArtistId[candidate.artistId] ?: emptyList(),
+                artistSkipEvents   = skipsByArtistId[candidate.artistId] ?: emptyList(),
+                recentSearchTokens = recentSearchTokens,
+                nowMs              = nowMs
+            )
+            candidate.videoId to score(ctx)
+        }
+    }
+
     fun score(ctx: ScoringContext): Float {
         val affinity    = affinity(ctx)
         val completion  = completion(ctx)

@@ -182,7 +182,15 @@ class PlayerViewModel @Inject constructor(
     fun toggleQueueExpanded()          { _uiState.value = _uiState.value.copy(isQueueExpanded = !_uiState.value.isQueueExpanded) }
     fun setQueueMode(mode: QueueMode)  { _uiState.value = _uiState.value.copy(queueMode = mode) }
     fun onToggleShuffle()              { _uiState.value = _uiState.value.copy(isShuffle = !_uiState.value.isShuffle) }
-    fun onToggleLike()                 { _uiState.value = _uiState.value.copy(isLiked = !_uiState.value.isLiked) }
+    fun onToggleLike() {
+        val track = _uiState.value.track ?: return
+        val newLiked = !_uiState.value.isLiked
+        _uiState.value = _uiState.value.copy(isLiked = newLiked)
+        viewModelScope.launch {
+            if (newLiked) recommendationRepository.markFavorite(track)
+            else recommendationRepository.unmarkFavorite(track.id)
+        }
+    }
     fun onGenerateListeningCard()      { /* TODO: render bitmap + share */ }
     fun onSleepTimer()                 { _uiState.value = _uiState.value.copy(activeSheet = PlayerSheet.SLEEP_TIMER) }
     fun onSpeedPitch()                 { _uiState.value = _uiState.value.copy(activeSheet = PlayerSheet.SPEED_PITCH) }
@@ -318,15 +326,35 @@ class PlayerViewModel @Inject constructor(
     }
 
     fun onRadioMode() {
-        _uiState.value = _uiState.value.copy(queueMode = QueueMode.AUTOPLAY)
+        _uiState.value = _uiState.value.copy(queueMode = QueueMode.RADIO)
         val track = _uiState.value.track ?: return
         viewModelScope.launch {
             try {
-                val generated = generateQueueUseCase(seedTrack = track, mode = QueueMode.AUTOPLAY, limit = 30)
+                val generated = generateQueueUseCase(seedTrack = track, mode = QueueMode.RADIO, limit = 30)
                 val newQueue = listOf(track) + generated
                 _uiState.value = _uiState.value.copy(queue = newQueue, queueIndex = 0)
                 queueRepository.replaceQueue(newQueue, 0)
                 prefetchNextTrack()
+            } catch (_: Exception) {}
+        }
+    }
+
+    /** Artist Radio: seeds the smart pipeline with an artist instead of a track, mirroring startRadioWith(). */
+    fun startArtistRadio(artistId: String, artistName: String) {
+        setQueueMode(QueueMode.RADIO)
+        viewModelScope.launch {
+            try {
+                val generated = generateQueueUseCase.forArtist(
+                    artistId = artistId,
+                    artistName = artistName,
+                    mode = QueueMode.RADIO,
+                    limit = 30
+                )
+                if (generated.isEmpty()) return@launch
+                setTrack(generated.first())
+                setQueue(generated, 0)
+                currentlyPlayingId = null
+                loadTrack(generated.first().id)
             } catch (_: Exception) {}
         }
     }
@@ -495,6 +523,10 @@ class PlayerViewModel @Inject constructor(
         if (currentlyPlayingId == videoId) return
         prefetchJob?.cancel()
         playbackCacheProvider.cancelPrefetch()
+        // Independent of the main load coroutine below so a DB lookup can never delay playback start.
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isLiked = recommendationRepository.isFavorite(videoId))
+        }
         viewModelScope.launch {
             currentlyPlayingId = videoId
             trackStartMs = System.currentTimeMillis()
@@ -532,7 +564,11 @@ class PlayerViewModel @Inject constructor(
                     try { recommendationRepository.fetchAndIngestRelatedTracksBulk(videoId); homeFeedRepository.refresh() }
                     catch (_: Exception) {}
                 }
-                if (_uiState.value.track != null && _uiState.value.queue.size <= 3) fetchAutoQueue()
+                // Remaining-count check (not total queue length) so generation starts with a buffer
+                // before playback actually runs dry on a long queue, not only once the list itself
+                // shrinks to 3 entries.
+                val state = _uiState.value
+                if (state.track != null && state.queue.size - state.queueIndex <= 3) fetchAutoQueue()
                 prefetchNextTrack()
                 if (autoPlay && settings.lyricsAutoOpen) onLyrics()
             } catch (e: Exception) {

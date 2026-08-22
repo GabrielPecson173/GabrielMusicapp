@@ -28,12 +28,14 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Radio
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.outlined.Favorite
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.KeyboardArrowLeft
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.PlayArrow
+import androidx.compose.material.icons.outlined.Radio
 import androidx.compose.material.icons.outlined.Shuffle
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -122,7 +124,8 @@ fun ArtistScreen(
                             isFollowing = uiState.isFollowing,
                             onPlay = { playTracks(artist.allSongs, 0) },
                             onShuffle = { playTracks(artist.allSongs.shuffled(), 0) },
-                            onToggleFollow = viewModel::toggleFollow
+                            onToggleFollow = viewModel::toggleFollow,
+                            onRadio = { playerViewModel.startArtistRadio(artistKey, artist.name) }
                         )
                     }
 
@@ -318,7 +321,8 @@ private fun ArtistControlsRow(
     isFollowing: Boolean,
     onPlay: () -> Unit,
     onShuffle: () -> Unit,
-    onToggleFollow: () -> Unit
+    onToggleFollow: () -> Unit,
+    onRadio: () -> Unit
 ) {
     val palette = LocalAppPalette.current
     Row(
@@ -347,6 +351,15 @@ private fun ArtistControlsRow(
             Icon(
                 modularIcon(Icons.Default.Shuffle, Icons.Outlined.Shuffle),
                 contentDescription = "Shuffle",
+                tint = palette.onBackground,
+                modifier = Modifier.size(24.dp)
+            )
+        }
+        Spacer(modifier = Modifier.width(4.dp))
+        IconButton(onClick = onRadio) {
+            Icon(
+                modularIcon(Icons.Default.Radio, Icons.Outlined.Radio),
+                contentDescription = "Artist Radio",
                 tint = palette.onBackground,
                 modifier = Modifier.size(24.dp)
             )

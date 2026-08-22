@@ -29,7 +29,7 @@ import com.example.ytmusicapp.data.db.entity.*
         MbAlbumEntity::class,
         MbAlbumTrackEntity::class
     ],
-    version = 7,
+    version = 8,
     exportSchema = false
 )
 @TypeConverters(VectorTypeConverter::class)
@@ -194,6 +194,19 @@ abstract class AppDatabase : RoomDatabase() {
                     matchedVideoId TEXT,
                     matchedThumbnailUrl TEXT)""")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_mb_album_tracks_albumId ON mb_album_tracks(albumId)")
+            }
+        }
+
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Persists the CAA-vs-matched-video-thumbnail decision (previously re-derived,
+                // backwards, on every cached read) instead of recomputing it. Existing rows get
+                // '' (blank), which ArtistRepository.toAlbum() treats as "not decided yet" and
+                // falls back to the Cover Art Archive URL directly until the album naturally
+                // re-resolves with the corrected priority.
+                db.execSQL(
+                    "ALTER TABLE mb_albums ADD COLUMN thumbnailUrl TEXT NOT NULL DEFAULT ''"
+                )
             }
         }
     }

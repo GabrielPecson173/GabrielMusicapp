@@ -6,12 +6,12 @@ import com.example.ytmusicapp.data.db.dao.ShelfImpressionDao
 import com.example.ytmusicapp.data.db.dao.SkipEventDao
 import com.example.ytmusicapp.data.db.dao.SuppressionDao
 import com.example.ytmusicapp.data.db.entity.RecommendationCandidateEntity
-import com.example.ytmusicapp.data.db.entity.ShelfImpressionEntity
 import com.example.ytmusicapp.domain.engine.EpsilonGreedyAllocator
 import com.example.ytmusicapp.domain.engine.MMRDiversifier
 import com.example.ytmusicapp.domain.engine.TasteProfileEngine
 import com.example.ytmusicapp.domain.engine.TfIdfEngine
 import com.example.ytmusicapp.domain.engine.TrackScoringEngine
+import com.example.ytmusicapp.data.util.ThumbnailResolver
 import com.example.ytmusicapp.domain.model.Track
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -96,31 +96,11 @@ class HomeFeedRepository @Inject constructor(
         _refreshTrigger.emit(Unit)
     }
 
-    suspend fun logImpression(sectionId: String) {
-        withContext(Dispatchers.IO) {
-            shelfImpressionDao.insert(
-                ShelfImpressionEntity(
-                    sectionId       = sectionId,
-                    timestamp       = System.currentTimeMillis(),
-                    clickCount      = 0,
-                    impressionCount = 1
-                )
-            )
-        }
-    }
-
-    suspend fun logSectionClick(sectionId: String) {
-        withContext(Dispatchers.IO) {
-            shelfImpressionDao.insert(
-                ShelfImpressionEntity(
-                    sectionId       = sectionId,
-                    timestamp       = System.currentTimeMillis(),
-                    clickCount      = 1,
-                    impressionCount = 0
-                )
-            )
-        }
-    }
+    // Impression/click telemetry is logged exclusively via EventTracker (data/tracker/Eventtracker.kt)
+    // — a duplicate write path used to exist here too (shelfImpressionDao.insert), causing every
+    // impression/click to be double-counted in shelf_impressions. That inflated the numbers
+    // CandidateLifecycleManager's degrade/demote thresholds read, and bypassed the diagnosticsEnabled
+    // privacy toggle EventTracker respects. Removed; see HomeScreen.kt's direct eventTracker calls.
 
     // ── Feed builder ──────────────────────────────────────────────────────────
 
@@ -150,7 +130,7 @@ class HomeFeedRepository @Inject constructor(
 
         tfIdfEngine.buildIndex(candidates)
 
-        val scoreMap = buildScoreMap(
+        val scoreMap = scoringEngine.scoreAll(
             candidates         = candidates,
             recentPlays        = recentPlays,
             recentSkips        = recentSkips.toList(),
@@ -198,7 +178,7 @@ class HomeFeedRepository @Inject constructor(
         val recentSkips = skipEventDao.getSince(nowMs - MS_48H)
         val artistMap   = candidates.associate { it.videoId to it.artistId }
 
-        val scoreMap = buildScoreMap(
+        val scoreMap = scoringEngine.scoreAll(
             candidates         = candidates,
             recentPlays        = recentPlays,
             recentSkips        = recentSkips.toList(),
@@ -507,35 +487,6 @@ class HomeFeedRepository @Inject constructor(
         return (recentImpressions / 10f).coerceAtMost(1f)
     }
 
-    // ── Score map ─────────────────────────────────────────────────────────────
-
-    private fun buildScoreMap(
-        candidates: List<RecommendationCandidateEntity>,
-        recentPlays: List<com.example.ytmusicapp.data.db.entity.PlayEventEntity>,
-        recentSkips: List<com.example.ytmusicapp.data.db.entity.SkipEventEntity>,
-        artistMap: Map<String, String>,
-        recentSearchTokens: List<String>,
-        nowMs: Long
-    ): Map<String, Float> {
-        val playsByVideoId  = recentPlays.groupBy { it.videoId }
-        val skipsByVideoId  = recentSkips.groupBy { it.videoId }
-        val playsByArtistId = recentPlays.groupBy { artistMap[it.videoId] ?: "" }
-        val skipsByArtistId = recentSkips.groupBy { artistMap[it.videoId] ?: "" }
-
-        return candidates.associate { candidate ->
-            val ctx = TrackScoringEngine.ScoringContext(
-                candidate          = candidate,
-                playEvents         = playsByVideoId[candidate.videoId] ?: emptyList(),
-                skipEvents         = skipsByVideoId[candidate.videoId] ?: emptyList(),
-                artistPlayEvents   = playsByArtistId[candidate.artistId] ?: emptyList(),
-                artistSkipEvents   = skipsByArtistId[candidate.artistId] ?: emptyList(),
-                recentSearchTokens = recentSearchTokens,
-                nowMs              = nowMs
-            )
-            candidate.videoId to scoringEngine.score(ctx)
-        }
-    }
-
     // ── Mapper ────────────────────────────────────────────────────────────────
 
     @Suppress("SpellCheckingInspection")
@@ -544,7 +495,9 @@ class HomeFeedRepository @Inject constructor(
         title        = title,
         artist       = artistName,
         album        = albumName,
-        thumbnailUrl = thumbnailUrl.ifBlank { "https://i.ytimg.com/vi/$videoId/mqdefault.jpg" },
+        // Starting point only — YoutubeThumbnailInterceptor verifies and falls back at render
+        // time, so this doesn't need to hedge down to a low-res tier itself.
+        thumbnailUrl = thumbnailUrl.ifBlank { ThumbnailResolver.fromVideoId(videoId) },
         durationMs   = durationMs,
         isDownloaded = false
     )

@@ -3,7 +3,10 @@ package com.example.ytmusicapp
 import android.app.Application
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
+import coil.ImageLoader
+import coil.ImageLoaderFactory
 import com.example.ytmusicapp.data.datastore.UserPreferencesDataStore
+import com.example.ytmusicapp.data.image.YoutubeThumbnailInterceptor
 import com.example.ytmusicapp.download.DownloadManagerProvider
 import com.example.ytmusicapp.download.DownloadStatusListener
 import com.example.ytmusicapp.worker.WorkerScheduler
@@ -21,17 +24,27 @@ import org.schabi.newpipe.extractor.downloader.Response
 import javax.inject.Inject
 
 @HiltAndroidApp
-class App : Application(), Configuration.Provider {
+class App : Application(), Configuration.Provider, ImageLoaderFactory {
 
     @Inject lateinit var workerFactory: HiltWorkerFactory
     @Inject lateinit var workerScheduler: WorkerScheduler
     @Inject lateinit var downloadStatusListener: DownloadStatusListener
     @Inject lateinit var downloadManagerProvider: DownloadManagerProvider
     @Inject lateinit var userPreferencesDataStore: UserPreferencesDataStore
+    @Inject lateinit var youtubeThumbnailInterceptor: YoutubeThumbnailInterceptor
 
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder()
             .setWorkerFactory(workerFactory)
+            .build()
+
+    // Coil auto-detects an Application implementing ImageLoaderFactory and uses it as the app-wide
+    // singleton ImageLoader — this is the single place YoutubeThumbnailInterceptor is installed,
+    // so every AsyncImage call site in the app gets HD-preferring, verified-fallback thumbnails
+    // without needing to change.
+    override fun newImageLoader(): ImageLoader =
+        ImageLoader.Builder(this)
+            .components { add(youtubeThumbnailInterceptor) }
             .build()
 
     override fun onCreate() {

@@ -117,15 +117,6 @@ class EventTracker @Inject constructor(
         }
     }
 
-    fun logFavorite(videoId: String) {
-        logPlay(
-            videoId = videoId,
-            playDurationMs = 0L,
-            totalDurationMs = 0L,
-            isCompleted = false
-        )
-    }
-
     fun logNotInterested(videoId: String) {
         if (!diagnosticsEnabled) return
         scope.launch {

@@ -17,9 +17,17 @@ import javax.inject.Singleton
 data class MbReleaseGroup(val id: String, val title: String, val year: Int?)
 data class MbTrack(val trackNumber: Int, val title: String, val durationMs: Long)
 
+// Excludes only secondary types that genuinely aren't a meaningfully distinct song (or aren't
+// music at all) on an Artist Page: a remix/DJ-mix/mixtape edit of a track already shown elsewhere,
+// or non-music spoken content. Deliberately does NOT exclude "live" or "compilation" — a live
+// cover or a compilation-exclusive track is real, often unique music for a niche artist (verified
+// directly against MusicBrainz: e.g. Nerissa Ravencroft has a Live-tagged release-group that is a
+// distinct song cover with no other release anywhere), and "soundtrack" is likewise often an
+// artist's only release of that song. This list is Artist-Page-specific (getReleaseGroups' only
+// caller today) — a future stricter recommendation-candidate-ingestion use, if one is added, may
+// reasonably want a narrower list than this.
 private val EXCLUDED_SECONDARY_TYPES = setOf(
-    "compilation", "live", "remix", "soundtrack", "dj-mix", "mixtape/street",
-    "spokenword", "interview", "audiobook", "audio drama"
+    "remix", "dj-mix", "mixtape/street", "spokenword", "interview", "audiobook", "audio drama"
 )
 
 /** Cover Art Archive front cover for a release-group — a plain image URL, no API call, no rate
@@ -56,6 +64,26 @@ class MusicBrainzRepository @Inject constructor(
     private val requestMutex = Mutex()
     private var lastRequestAtMs = 0L
 
+    /**
+     * Whether Cover Art Archive actually has front cover art for this release-group — a cheap
+     * HEAD request (no image bytes downloaded), and NOT subject to MusicBrainz's own 1 req/sec
+     * limit since Cover Art Archive is a separate service. Lets callers decide between "prefer
+     * this purpose-made album cover" and "fall back to something else" instead of blindly trusting
+     * the URL and letting a 404 render as a broken image. Cover Art Archive's dedicated artwork is
+     * generally meaningfully better than an incidental matched-video thumbnail (which can be an
+     * old, sub-HD, or differently-cropped upload) — see [ArtistRepository.resolveAlbum].
+     */
+    suspend fun hasCoverArt(releaseGroupMbid: String): Boolean = withContext(Dispatchers.IO) {
+        runCatching {
+            val request = Request.Builder()
+                .url(musicBrainzCoverArtUrl(releaseGroupMbid))
+                .head()
+                .header("User-Agent", USER_AGENT)
+                .build()
+            okHttpClient.newCall(request).execute().use { it.isSuccessful }
+        }.getOrDefault(false)
+    }
+
     /** Highest-scoring artist match, or null if MusicBrainz has no confident (score >= 90)
      *  match — a real, cacheable "this artist isn't in MusicBrainz" outcome, not an error.
      *  Deliberately does NOT swallow network/parsing exceptions itself (unlike most other
@@ -85,23 +113,43 @@ class MusicBrainzRepository @Inject constructor(
         if (bestScore >= MIN_ARTIST_MATCH_SCORE) bestId else null
     }
 
-    /** Studio albums only — `type=album` still includes compilations/live albums/reissues
-     *  (MusicBrainz layers these as "secondary types" on top of the album primary type), which
-     *  needlessly inflates how much a prolific artist's page has to resolve. That data is
-     *  already in the response, just unused before now. */
-    suspend fun getAlbumReleaseGroups(artistMbid: String): List<MbReleaseGroup> =
+    /** Albums, EPs, and singles — `type=album|ep|single` (pipe-delimited multi-type is the
+     *  officially documented syntax for this browse endpoint, e.g. MusicBrainz's own docs example
+     *  `/ws/2/release-group?artist=...&type=album|ep`). Deliberately does NOT request every
+     *  primary type (dropping the filter entirely would also admit Broadcast/Other, which are
+     *  lower-signal) — just the three that represent a real, listenable release. This used to be
+     *  `type=album` only, which silently returned zero release-groups for any artist whose real
+     *  catalog is Single/EP-typed (extremely common for indie/VTuber/niche artists) even with a
+     *  perfect artist-MBID match.
+     *  Secondary types (compilations/live albums/reissues, layered on top of any primary type)
+     *  are still excluded below via [EXCLUDED_SECONDARY_TYPES], independent of this change. */
+    suspend fun getReleaseGroups(artistMbid: String): List<MbReleaseGroup> =
         withContext(Dispatchers.IO) {
-            val url = "$BASE_URL/release-group".toHttpUrl().newBuilder()
-                .addQueryParameter("artist", artistMbid)
-                .addQueryParameter("type", "album")
-                .addQueryParameter("fmt", "json")
-                .addQueryParameter("limit", "100")
-                .build()
-            val json = runCatching { rateLimitedGet(url) }.getOrNull() ?: return@withContext emptyList()
-            val groups = json.optJSONArray("release-groups") ?: return@withContext emptyList()
+            // A single limit=100 request silently truncates a prolific artist's catalog — page
+            // through using the API's own release-group-count/release-group-offset fields rather
+            // than assuming one response is complete (100 comfortably covers a niche artist, but
+            // is a real completeness bug for anyone with a larger discography).
+            val allGroupsJson = mutableListOf<org.json.JSONObject>()
+            var offset = 0
+            var totalCount = Int.MAX_VALUE
+            while (offset < totalCount) {
+                val url = "$BASE_URL/release-group".toHttpUrl().newBuilder()
+                    .addQueryParameter("artist", artistMbid)
+                    .addQueryParameter("type", "album|ep|single")
+                    .addQueryParameter("fmt", "json")
+                    .addQueryParameter("limit", "100")
+                    .addQueryParameter("offset", offset.toString())
+                    .build()
+                val json = runCatching { rateLimitedGet(url) }.getOrNull() ?: break
+                totalCount = json.optInt("release-group-count", 0)
+                val groups = json.optJSONArray("release-groups") ?: break
+                if (groups.length() == 0) break
+                (0 until groups.length()).forEach { allGroupsJson.add(groups.getJSONObject(it)) }
+                offset += groups.length()
+            }
 
-            (0 until groups.length()).mapNotNull { i ->
-                val g = groups.getJSONObject(i)
+            var excludedCount = 0
+            val retained = allGroupsJson.mapNotNull { g ->
                 val id = g.optString("id").takeIf { it.isNotBlank() } ?: return@mapNotNull null
                 val title = g.optString("title").takeIf { it.isNotBlank() } ?: return@mapNotNull null
 
@@ -109,7 +157,7 @@ class MusicBrainzRepository @Inject constructor(
                 val isExcluded = secondaryTypes != null && (0 until secondaryTypes.length()).any {
                     secondaryTypes.optString(it).lowercase() in EXCLUDED_SECONDARY_TYPES
                 }
-                if (isExcluded) return@mapNotNull null
+                if (isExcluded) { excludedCount++; return@mapNotNull null }
 
                 val year = g.optString("first-release-date")
                     .takeIf { it.length >= 4 }
@@ -117,53 +165,87 @@ class MusicBrainzRepository @Inject constructor(
                     ?.toIntOrNull()
                 MbReleaseGroup(id, title, year)
             }
+            android.util.Log.d(
+                "MusicBrainzRepo",
+                "getReleaseGroups($artistMbid): fetched=${allGroupsJson.size} " +
+                    "excludedBySecondaryType=$excludedCount retained=${retained.size}"
+            )
+            retained
         }
 
     /** Picks a "standard" release within the group (official status, modal track count across
-     *  editions — avoids a deluxe/regional outlier) and returns its full ordered tracklist. */
+     *  editions — avoids a deluxe/regional outlier) and returns its full ordered tracklist.
+     *
+     *  Single combined `inc=media+recordings` call per page of releases — verified directly
+     *  against MusicBrainz that this endpoint embeds full tracklists (media/tracks/recordings)
+     *  for every candidate release in one response, eliminating what used to be a second,
+     *  separate per-release `fetchTracklist` call. For a prolific artist (dozens to 100+
+     *  release-groups, each previously 2 sequential ~1.1s-rate-limited calls), this roughly
+     *  halves total resolution wall-clock time without relaxing the rate limit itself — it's the
+     *  same number of *releases* fetched, just one HTTP round-trip per release-group instead of
+     *  two. */
     suspend fun resolveTracklist(releaseGroupMbid: String): List<MbTrack>? =
         withContext(Dispatchers.IO) {
-            val releaseId = pickPreferredRelease(releaseGroupMbid) ?: return@withContext null
-            fetchTracklist(releaseId)
-        }
+            // Prefer an official release, but a niche/independent release-group's only release may
+            // genuinely not carry "Official" status in MusicBrainz — falling back to "any status"
+            // rather than giving up outright avoids treating a real release as if it doesn't exist
+            // just because of its cataloged status.
+            val official = fetchReleasesWithTracks(releaseGroupMbid, statusFilter = "official")
+            val releasesJson = official.ifEmpty { fetchReleasesWithTracks(releaseGroupMbid, statusFilter = null) }
+            if (releasesJson.isEmpty()) return@withContext null
 
-    private suspend fun pickPreferredRelease(releaseGroupMbid: String): String? {
-        val url = "$BASE_URL/release".toHttpUrl().newBuilder()
-            .addQueryParameter("release-group", releaseGroupMbid)
-            .addQueryParameter("inc", "media")
-            .addQueryParameter("status", "official")
-            .addQueryParameter("fmt", "json")
-            .addQueryParameter("limit", "100")
-            .build()
-        val json = runCatching { rateLimitedGet(url) }.getOrNull() ?: return null
-        val releases = json.optJSONArray("releases") ?: return null
-        if (releases.length() == 0) return null
-
-        data class Candidate(val id: String, val trackCount: Int)
-        val candidates = (0 until releases.length()).mapNotNull { i ->
-            val r = releases.getJSONObject(i)
-            val id = r.optString("id").takeIf { it.isNotBlank() } ?: return@mapNotNull null
-            val media = r.optJSONArray("media") ?: return@mapNotNull null
-            var trackCount = 0
-            for (m in 0 until media.length()) {
-                trackCount += media.getJSONObject(m).optInt("track-count", 0)
+            data class Candidate(val json: JSONObject, val trackCount: Int)
+            val candidates = releasesJson.mapNotNull { r ->
+                val media = r.optJSONArray("media") ?: return@mapNotNull null
+                var trackCount = 0
+                for (m in 0 until media.length()) {
+                    trackCount += media.getJSONObject(m).optInt("track-count", 0)
+                }
+                if (trackCount > 0) Candidate(r, trackCount) else null
             }
-            if (trackCount > 0) Candidate(id, trackCount) else null
-        }
-        if (candidates.isEmpty()) return null
+            if (candidates.isEmpty()) return@withContext null
 
-        val modalCount = candidates.groupingBy { it.trackCount }.eachCount().maxByOrNull { it.value }?.key
-        return candidates.firstOrNull { it.trackCount == modalCount }?.id ?: candidates.first().id
+            val modalCount = candidates.groupingBy { it.trackCount }.eachCount().maxByOrNull { it.value }?.key
+            val preferred = candidates.firstOrNull { it.trackCount == modalCount } ?: candidates.first()
+
+            val tracks = parseTracklist(preferred.json)
+            android.util.Log.d(
+                "MusicBrainzRepo",
+                "resolveTracklist($releaseGroupMbid): candidates=${candidates.size} " +
+                    "picked=${preferred.json.optString("id")} recordings=${tracks.size}"
+            )
+            tracks.ifEmpty { null }
+        }
+
+    // Pages through using release-count/release-offset — a single limit=100 request is virtually
+    // always complete for one release-group's releases, but this avoids assuming that silently.
+    // inc=media+recordings embeds each release's full medium/track/recording data inline.
+    private suspend fun fetchReleasesWithTracks(releaseGroupMbid: String, statusFilter: String?): List<JSONObject> {
+        val all = mutableListOf<JSONObject>()
+        var offset = 0
+        var totalCount = Int.MAX_VALUE
+        while (offset < totalCount) {
+            val builder = "$BASE_URL/release".toHttpUrl().newBuilder()
+                .addQueryParameter("release-group", releaseGroupMbid)
+                .addQueryParameter("inc", "media+recordings")
+                .addQueryParameter("fmt", "json")
+                .addQueryParameter("limit", "100")
+                .addQueryParameter("offset", offset.toString())
+            if (statusFilter != null) builder.addQueryParameter("status", statusFilter)
+            val json = runCatching { rateLimitedGet(builder.build()) }.getOrNull() ?: break
+            totalCount = json.optInt("release-count", 0)
+            val releases = json.optJSONArray("releases") ?: break
+            if (releases.length() == 0) break
+            (0 until releases.length()).forEach { all.add(releases.getJSONObject(it)) }
+            offset += releases.length()
+        }
+        return all
     }
 
-    private suspend fun fetchTracklist(releaseId: String): List<MbTrack>? {
-        val url = "$BASE_URL/release/$releaseId".toHttpUrl().newBuilder()
-            .addQueryParameter("inc", "recordings")
-            .addQueryParameter("fmt", "json")
-            .build()
-        val json = runCatching { rateLimitedGet(url) }.getOrNull() ?: return null
-        val media = json.optJSONArray("media") ?: return null
-
+    // Walks every medium (multi-disc releases included) and every track within it — a release
+    // object already carrying inc=media+recordings data, no further network call.
+    private fun parseTracklist(releaseJson: JSONObject): List<MbTrack> {
+        val media = releaseJson.optJSONArray("media") ?: return emptyList()
         val tracks = mutableListOf<MbTrack>()
         for (m in 0 until media.length()) {
             val trackArray = media.getJSONObject(m).optJSONArray("tracks") ?: continue
@@ -181,7 +263,7 @@ class MusicBrainzRepository @Inject constructor(
                 tracks.add(MbTrack(number, title, durationMs.coerceAtLeast(0L)))
             }
         }
-        return tracks.ifEmpty { null }
+        return tracks
     }
 
     private suspend fun rateLimitedGet(url: HttpUrl): JSONObject = requestMutex.withLock {

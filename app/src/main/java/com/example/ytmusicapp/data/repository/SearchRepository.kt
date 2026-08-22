@@ -1,6 +1,7 @@
 package com.example.ytmusicapp.data.repository
 
 import android.util.Log
+import com.example.ytmusicapp.domain.engine.MusicContentClassifier
 import com.example.ytmusicapp.domain.model.Track
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -20,6 +21,11 @@ import javax.inject.Singleton
  *  widest available image instead. */
 private fun List<Image>.bestUrl(): String = maxByOrNull { it.width }?.url ?: firstOrNull()?.url ?: ""
 
+// A first page near-full of results is a signal there's likely more — worth one extra round-trip
+// rather than silently treating "however many fit on page 1" as the artist's complete
+// album/single catalog. Not unbounded crawling: exactly one extra page, ever.
+private const val ALBUM_PAGE_FULL_THRESHOLD = 18
+
 /** A YouTube Music album search hit — enough to show a card and fetch the full tracklist on
  *  demand via [SearchRepository.getAlbumTracks]. */
 data class AlbumSearchResult(
@@ -31,34 +37,87 @@ data class AlbumSearchResult(
 )
 
 @Singleton
-class SearchRepository @Inject constructor() {
+class SearchRepository @Inject constructor(
+    private val musicContentClassifier: MusicContentClassifier
+) {
 
     suspend fun search(query: String): List<Track> =
         withContext(Dispatchers.IO) {
-            val extractor: SearchExtractor = ServiceList.YouTube
-                .getSearchExtractor(
-                    query,
-                    listOf("music_songs"),
-                    ""
-                )
-            extractor.fetchPage()
-            extractor.initialPage.items
-                .filterIsInstance<StreamInfoItem>()
-                .filter { it.duration in 60..600 }
-                .mapNotNull { it.toDomain() }
+            rawSearchItems(query, null).classifyAndFilter()
         }
 
     suspend fun nextPage(query: String, pageUrl: String): List<Track> =
         withContext(Dispatchers.IO) {
-            val extractor: SearchExtractor = ServiceList.YouTube
-                .getSearchExtractor(query, listOf("music_songs"), "")
-            extractor.fetchPage()
-            val page = org.schabi.newpipe.extractor.Page(pageUrl)
-            extractor.getPage(page).items
-                .filterIsInstance<StreamInfoItem>()
-                .filter { it.duration in 60..600 }
-                .mapNotNull { it.toDomain() }
+            rawSearchItems(query, pageUrl).classifyAndFilter()
         }
+
+    /**
+     * Same search as [search], but follows up to [maxPages] of YouTube's own result pages before
+     * classifying/filtering. A single page is ~20-30 items — plenty for a normal interactive
+     * search, but an undercount for "give me as much of this artist's real catalog as fast as
+     * possible" (ArtistRepository's fast-preview path), especially since, unlike MusicBrainz,
+     * YouTube search isn't subject to any comparable rate limit — paginating it a few pages deep
+     * is cheap and fast. Not unbounded: stops at [maxPages] or whenever YouTube stops offering a
+     * next page, whichever comes first.
+     */
+    suspend fun searchMultiPage(query: String, maxPages: Int): List<Track> =
+        withContext(Dispatchers.IO) {
+            val extractor: SearchExtractor = ServiceList.YouTube.getSearchExtractor(query, listOf("music_songs"), "")
+            extractor.fetchPage()
+            val allItems = mutableListOf<StreamInfoItem>()
+            var page = extractor.initialPage
+            allItems += page.items.filterIsInstance<StreamInfoItem>()
+            var pagesFetched = 1
+            while (pagesFetched < maxPages && page.hasNextPage()) {
+                page = runCatching { extractor.getPage(page.nextPage) }.getOrNull() ?: break
+                allItems += page.items.filterIsInstance<StreamInfoItem>()
+                pagesFetched++
+            }
+            Log.d("SearchRepo", "searchMultiPage('$query'): pages=$pagesFetched rawItems=${allItems.size}")
+            allItems.classifyAndFilter()
+        }
+
+    /**
+     * Same underlying search as [search], but WITHOUT [MusicContentClassifier] filtering — for
+     * matching a known-real MusicBrainz canonical track to its playable YouTube video
+     * (`ArtistRepository.matchCanonicalTrack`). That caller already independently verifies title,
+     * duration, and artist-credit correspondence to a real recording MusicBrainz confirms exists;
+     * running a generic music-vs-non-music classifier on top adds no benefit there and only the
+     * risk of dropping the correct match before the caller's own verification ever sees it.
+     */
+    suspend fun searchRaw(query: String): List<Track> =
+        withContext(Dispatchers.IO) {
+            rawSearchItems(query, null).mapNotNull { it.toDomain() }
+        }
+
+    private fun rawSearchItems(query: String, pageUrl: String?): List<StreamInfoItem> {
+        val extractor: SearchExtractor = ServiceList.YouTube
+            .getSearchExtractor(query, listOf("music_songs"), "")
+        extractor.fetchPage()
+        val items = if (pageUrl == null) {
+            extractor.initialPage.items
+        } else {
+            extractor.getPage(org.schabi.newpipe.extractor.Page(pageUrl)).items
+        }
+        return items.filterIsInstance<StreamInfoItem>()
+    }
+
+    // Replaces the old hard `duration in 60..600` cutoff, which excluded legitimate long-form
+    // content (concerts, extended performances) and did nothing to catch obviously non-music
+    // results. Drops only near-certain non-music (MusicContentClassifier.isLikelyNonMusic), then
+    // stable-partitions into a confident tier and a borderline tier — each tier keeps YouTube's
+    // own relevance ordering rather than being re-sorted by raw score. This is classification-
+    // assisted filtering/demotion on top of YouTube's existing order, not a replacement ranking:
+    // a 0.0-scoring result sorts ahead of a -0.1 one purely by tier, not because it's "more music".
+    private fun List<StreamInfoItem>.classifyAndFilter(): List<Track> =
+        mapNotNull { item ->
+            item.toDomain()?.let { track ->
+                track to musicContentClassifier.score(item.name, item.uploaderName ?: "", item.duration)
+            }
+        }
+            .filterNot { (_, score) -> musicContentClassifier.isLikelyNonMusic(score) }
+            .sortedByDescending { (_, score) -> score >= 0f }
+            .map { (track, _) -> track }
 
     suspend fun getRelatedTracks(videoId: String): List<Track> =
         withContext(Dispatchers.IO) {
@@ -82,14 +141,25 @@ class SearchRepository @Inject constructor() {
                 .getSearchExtractor(query, listOf("music_albums"), "")
             extractor.fetchPage()
             val page = extractor.initialPage
+            var items = page.items
+            var errorCount = page.errors.size
+            var firstError = page.errors.firstOrNull()?.message
+
+            if (items.size >= ALBUM_PAGE_FULL_THRESHOLD && page.hasNextPage()) {
+                val second = runCatching { extractor.getPage(page.nextPage) }.getOrNull()
+                if (second != null) {
+                    items = items + second.items
+                    errorCount += second.errors.size
+                }
+            }
+
             Log.d(
                 "SearchRepo",
-                "searchAlbums('$query') -> ${page.items.size} raw item(s) " +
-                    "[${page.items.map { it::class.simpleName }.distinct()}], " +
-                    "${page.errors.size} error(s)" +
-                    (page.errors.firstOrNull()?.let { ": ${it.message}" } ?: "")
+                "searchAlbums('$query') -> ${items.size} raw item(s) " +
+                    "[${items.map { it::class.simpleName }.distinct()}], " +
+                    "$errorCount error(s)" + (firstError?.let { ": $it" } ?: "")
             )
-            page.items
+            items
                 .filterIsInstance<PlaylistInfoItem>()
                 .mapNotNull { it.toAlbumResult() }
         }

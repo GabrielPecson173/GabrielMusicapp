@@ -14,5 +14,13 @@ data class MbAlbumEntity(
     val artistName: String, // display-cased, used to render
     val title: String,
     val year: Int?,
-    val resolvedAtMs: Long
+    val resolvedAtMs: Long,
+    // Decided once, at resolution time (ArtistRepository.resolveAlbum), between Cover Art
+    // Archive's dedicated cover (preferred, when confirmed to exist) and a matched track's
+    // incidental video thumbnail (fallback) — persisted rather than re-derived on every cached
+    // read, so reading a cached album never needs a network call to make that decision, and a
+    // decision made with better logic doesn't silently keep applying old logic to old rows.
+    // Blank on rows written before this field existed; ArtistRepository.toAlbum() falls back to
+    // the Cover Art Archive URL directly for those until the album is naturally re-resolved.
+    val thumbnailUrl: String = ""
 )

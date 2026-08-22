@@ -1,5 +1,6 @@
 package com.example.ytmusicapp.data.repository
 
+import com.example.ytmusicapp.BuildConfig
 import com.example.ytmusicapp.data.db.dao.PlayEventDao
 import com.example.ytmusicapp.data.db.dao.PlaybackPositionDao
 import com.example.ytmusicapp.data.db.dao.RecommendationCandidateDao
@@ -13,6 +14,7 @@ import com.example.ytmusicapp.data.db.entity.RecommendationCandidateEntity
 import com.example.ytmusicapp.data.db.entity.SessionPairEntity
 import com.example.ytmusicapp.data.db.entity.SkipEventEntity
 import com.example.ytmusicapp.data.db.entity.SuppressionEntity
+import com.example.ytmusicapp.data.util.ThumbnailResolver
 import com.example.ytmusicapp.domain.model.Track
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -62,29 +64,9 @@ class RecommendationRepository @Inject constructor(
     private val playbackPositionDao: PlaybackPositionDao
 ) {
 
-    // ── Playback telemetry ────────────────────────────────────────────────────
-
-    suspend fun trackPlayback(
-        videoId: String,
-        playDurationMs: Long,
-        totalDurationMs: Long,
-        isCompleted: Boolean
-    ) = withContext(Dispatchers.IO) {
-        val completionRate = if (totalDurationMs > 0)
-            (playDurationMs.toFloat() / totalDurationMs).coerceIn(0f, 1f)
-        else 0f
-
-        playEventDao.insert(
-            PlayEventEntity(
-                videoId = videoId,
-                timestamp = System.currentTimeMillis(),
-                playbackDurationMs = playDurationMs,
-                totalDurationMs = totalDurationMs,
-                completionRate = completionRate,
-                isCompleted = isCompleted
-            )
-        )
-    }
+    // Playback telemetry is logged exclusively via EventTracker.logPlay (data/tracker/Eventtracker.kt)
+    // — this repository used to have its own separate trackPlayback() writer too, but nothing ever
+    // called it; PlayerViewModel always went through EventTracker. Removed to avoid two write paths.
 
     // ── Candidate ingestion ───────────────────────────────────────────────────
 
@@ -97,7 +79,7 @@ class RecommendationRepository @Inject constructor(
                 track.toCandidateEntity()
             }
 
-            candidateDao.insertAll(entities)
+            upsertCandidates(entities)
             pruneToCapIfNeeded()
         }
 
@@ -109,7 +91,7 @@ class RecommendationRepository @Inject constructor(
                 if (isSuppressed(track.id)) return@mapNotNull null
                 track.toCandidateEntity()
             }
-            candidateDao.insertAll(seedEntities)
+            upsertCandidates(seedEntities)
 
             coroutineScope {
                 related.take(5).map { track ->
@@ -120,7 +102,7 @@ class RecommendationRepository @Inject constructor(
                                 if (isSuppressed(t.id)) return@mapNotNull null
                                 t.toCandidateEntity()
                             }
-                            candidateDao.insertAll(entities)
+                            upsertCandidates(entities)
                         } catch (_: Exception) {}
                     }
                 }.awaitAll()
@@ -128,6 +110,49 @@ class RecommendationRepository @Inject constructor(
 
             pruneToCapIfNeeded()
         }
+
+    /**
+     * Replaces a blind `insertAll` (Room's OnConflictStrategy.IGNORE silently kept whichever
+     * thumbnail was first ever seen for a videoId, permanently — no later ingestion, however much
+     * better its thumbnail, could ever update it). New candidates still insert normally; for a
+     * videoId that already exists, only upgrades its thumbnailUrl (via
+     * [com.example.ytmusicapp.data.util.ThumbnailResolver.betterOf], never downgrades) and leaves
+     * every other field (isFavorite, popularityScore, ...) untouched.
+     */
+    private suspend fun upsertCandidates(candidates: List<RecommendationCandidateEntity>) {
+        if (candidates.isEmpty()) return
+        val existingByVideoId = candidateDao.getByVideoIds(candidates.map { it.videoId })
+            .associateBy { it.videoId }
+
+        val toInsert = mutableListOf<RecommendationCandidateEntity>()
+        candidates.forEach { incoming ->
+            val existing = existingByVideoId[incoming.videoId]
+            if (existing == null) {
+                toInsert.add(incoming)
+            } else {
+                val betterThumbnail = ThumbnailResolver.betterOf(existing.thumbnailUrl, incoming.thumbnailUrl)
+                if (betterThumbnail != existing.thumbnailUrl) {
+                    if (BuildConfig.DEBUG) {
+                        android.util.Log.d(
+                            "ThumbnailDebug",
+                            "upgrade ${incoming.videoId}: '${existing.thumbnailUrl}' " +
+                                "(rank ${ThumbnailResolver.rank(existing.thumbnailUrl)}) -> " +
+                                "'$betterThumbnail' (rank ${ThumbnailResolver.rank(betterThumbnail)})"
+                        )
+                    }
+                    candidateDao.update(existing.copy(thumbnailUrl = betterThumbnail))
+                } else if (ThumbnailResolver.rank(incoming.thumbnailUrl) < ThumbnailResolver.rank(existing.thumbnailUrl) && BuildConfig.DEBUG) {
+                    android.util.Log.d(
+                        "ThumbnailDebug",
+                        "kept existing ${incoming.videoId}: incoming '${incoming.thumbnailUrl}' " +
+                            "(rank ${ThumbnailResolver.rank(incoming.thumbnailUrl)}) would have downgraded " +
+                            "'${existing.thumbnailUrl}' (rank ${ThumbnailResolver.rank(existing.thumbnailUrl)})"
+                    )
+                }
+            }
+        }
+        if (toInsert.isNotEmpty()) candidateDao.insertAll(toInsert)
+    }
 
     private suspend fun pruneToCapIfNeeded() {
         val count = candidateDao.count()
@@ -158,9 +183,28 @@ class RecommendationRepository @Inject constructor(
             candidateDao.getFavorites()
         }
 
-    suspend fun markFavorite(videoId: String) = withContext(Dispatchers.IO) {
+    /**
+     * Marks [track] as favorited. Upserts — if the user liked a track that was never ingested as a
+     * "related" candidate (e.g. played directly from search), there is no existing
+     * RecommendationCandidateEntity row for it yet, and the like would otherwise be silently
+     * dropped since TrackScoringEngine's strongest signal (isFavorite) lives on that row.
+     */
+    suspend fun markFavorite(track: Track) = withContext(Dispatchers.IO) {
+        val existing = candidateDao.getByVideoId(track.id)
+        if (existing != null) {
+            candidateDao.update(existing.copy(isFavorite = true))
+        } else {
+            candidateDao.insert(track.toCandidateEntity().copy(isFavorite = true))
+        }
+    }
+
+    suspend fun unmarkFavorite(videoId: String) = withContext(Dispatchers.IO) {
         val candidate = candidateDao.getByVideoId(videoId) ?: return@withContext
-        candidateDao.update(candidate.copy(isFavorite = true))
+        candidateDao.update(candidate.copy(isFavorite = false))
+    }
+
+    suspend fun isFavorite(videoId: String): Boolean = withContext(Dispatchers.IO) {
+        candidateDao.getByVideoId(videoId)?.isFavorite ?: false
     }
 
     // ── Suppression ───────────────────────────────────────────────────────────

@@ -266,9 +266,7 @@ fun HomeScreen(
                 eventTracker = eventTracker,
                 playerViewModel = playerViewModel,
                 onTrackClick = onTrackClick,
-                onArtistClick = onArtistClick,
-                onSectionImpression = viewModel::onSectionImpression,
-                onSectionClick = viewModel::onSectionClick
+                onArtistClick = onArtistClick
             )
         }
     }
@@ -442,9 +440,7 @@ private fun FeedContent(
     eventTracker: EventTracker,
     playerViewModel: PlayerViewModel,
     onTrackClick: (String) -> Unit,
-    onArtistClick: (String) -> Unit,
-    onSectionImpression: (String) -> Unit,
-    onSectionClick: (String) -> Unit
+    onArtistClick: (String) -> Unit
 ) {
     val palette = LocalAppPalette.current
     val listState = rememberLazyListState()
@@ -495,14 +491,12 @@ private fun FeedContent(
         visibleSectionIds.forEach { sectionId ->
             if (impressedSections.add(sectionId)) {
                 eventTracker.logImpression(sectionId)
-                onSectionImpression(sectionId)
             }
         }
     }
 
     fun playTrack(section: HomeSection, track: Track) {
         eventTracker.logSectionClick(section.id)
-        onSectionClick(section.id)
         playerViewModel.setTrack(track)
         playerViewModel.setQueue(listOf(track), 0)
         onTrackClick(track.id)

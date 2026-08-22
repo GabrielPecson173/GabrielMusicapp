@@ -101,13 +101,4 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    // ── Impression / click telemetry ──────────────────────────────────────────
-
-    fun onSectionImpression(sectionId: String) {
-        viewModelScope.launch { homeFeedRepository.logImpression(sectionId) }
-    }
-
-    fun onSectionClick(sectionId: String) {
-        viewModelScope.launch { homeFeedRepository.logSectionClick(sectionId) }
-    }
 }

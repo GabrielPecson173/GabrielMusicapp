@@ -4,13 +4,13 @@ import com.example.ytmusicapp.data.db.dao.QueueDao
 import com.example.ytmusicapp.data.db.dao.TrackDao
 import com.example.ytmusicapp.data.db.entity.QueueEntity
 import com.example.ytmusicapp.data.db.entity.TrackEntity
+import com.example.ytmusicapp.data.util.ThumbnailResolver
 import com.example.ytmusicapp.domain.model.Track
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
-import kotlin.math.sqrt
 import com.example.ytmusicapp.domain.usecase.SearchMusicUseCase
 
 @Singleton
@@ -71,6 +71,13 @@ class QueueRepository @Inject constructor(
 
     fun currentSessionId(): String = currentSessionId
 
+    /**
+     * Legacy live-search generator (3 canned YouTube text queries, deduped, shuffled — no scoring,
+     * no personalization, no diversity control). No longer the primary queue/autoplay/radio source
+     * — GenerateQueueUseCase tries SmartQueueEngine's personalized pipeline first and only calls this
+     * to top up results when the local candidate pool is too thin (cold start / brand-new artist).
+     * Kept exactly as-is as that fallback safety net.
+     */
     suspend fun generateRelatedTracks(seedTrack: Track, limit: Int = 20): List<Track> {
         val queries = listOf(
             "${seedTrack.artist} mix",
@@ -88,23 +95,20 @@ class QueueRepository @Inject constructor(
             .take(limit)
     }
 
-    private fun Track.toFeatureVector(): FloatArray {
-        val artistScore = artist.hashCode().toFloat() / Int.MAX_VALUE
-        val durationBucket = (durationMs / 30_000L).toFloat()
-        return floatArrayOf(artistScore, durationBucket)
-    }
-
-    private fun cosineSimilarity(a: FloatArray, b: FloatArray): Float {
-        var dot = 0f
-        var normA = 0f
-        var normB = 0f
-        for (i in a.indices) {
-            dot += a[i] * b[i]
-            normA += a[i] * a[i]
-            normB += b[i] * b[i]
+    /** Same legacy live-search fallback as [generateRelatedTracks], scoped to Artist Radio's artist-name seed. */
+    suspend fun generateRelatedTracksForArtist(artistName: String, limit: Int = 20): List<Track> {
+        val queries = listOf(
+            "$artistName mix",
+            "best of $artistName",
+            "$artistName radio"
+        )
+        val results = queries.flatMap { query ->
+            try { searchMusicUseCase(query) } catch (_: Exception) { emptyList() }
         }
-        val mag = sqrt(normA) * sqrt(normB)
-        return if (mag == 0f) 0f else dot / mag
+        return results
+            .distinctBy { it.id }
+            .shuffled()
+            .take(limit)
     }
 
     private fun Track.toQueueEntity(
@@ -129,7 +133,10 @@ class QueueRepository @Inject constructor(
         title = title,
         artist = artist,
         album = "",
-        thumbnailUrl = thumbnailUrl ?: "",
+        // A queued item with no stored thumbnail shouldn't render blank — construct a starting
+        // ytimg URL from the (stable) mediaId/videoId; YoutubeThumbnailInterceptor resolves the
+        // actual best-available tier at render time.
+        thumbnailUrl = thumbnailUrl?.takeIf { it.isNotBlank() } ?: ThumbnailResolver.fromVideoId(mediaId),
         durationMs = durationMs,
         isDownloaded = false
     )

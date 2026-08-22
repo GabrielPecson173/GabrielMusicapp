@@ -43,8 +43,18 @@ private const val CANDIDATE_LIMIT = 2_000
 private const val MAX_ALBUM_RESULTS = 12
 private const val TAG = "ArtistRepository"
 private const val DURATION_TOLERANCE_MS = 10_000L
-private const val ALBUM_CONCURRENCY = 2
+// MusicBrainz calls are still hard-serialized behind a single ~1.1s-apart rate-limiter mutex
+// regardless of this value (see MusicBrainzRepository.rateLimitedGet) — raising this doesn't
+// speed up MusicBrainz itself. What it does do: let one album's YouTube-video-matching phase
+// (NewPipe searches, bounded separately by trackSearchSemaphore, NOT MusicBrainz-rate-limited)
+// overlap with another album's MusicBrainz-fetch phase, instead of the whole per-album pipeline
+// serializing behind a cap of 2. Meaningful for a large discography (dozens-to-100+ release
+// groups) without ever exceeding MusicBrainz's real rate limit.
+private const val ALBUM_CONCURRENCY = 6
 private const val TRACK_SEARCH_CONCURRENCY = 3
+// YouTube search isn't rate-limited the way MusicBrainz is, so paginating the fast-preview search
+// a few pages deep is cheap and fast — 3 pages is a few dozen extra results, not unbounded crawling.
+private const val FAST_PREVIEW_MAX_PAGES = 3
 
 @Singleton
 class ArtistRepository @Inject constructor(
@@ -170,7 +180,38 @@ class ArtistRepository @Inject constructor(
         )
     }
 
+    /** Bidirectional substring check rather than exact equality — channel names routinely carry
+     *  extra branding a plain `==` can't see through (VTuber channels especially, e.g. "Nerissa
+     *  Ravencroft Ch. hololive-EN"). Recognizes the artist is genuinely credited without needing
+     *  to enumerate every possible branding convention. */
+    private fun trackCreditsArtist(track: Track, normalizedArtistKey: String): Boolean =
+        ArtistNameUtils.extractArtists(track.title, track.artist).any {
+            val n = ArtistNameUtils.normalize(it)
+            n.contains(normalizedArtistKey) || normalizedArtistKey.contains(n)
+        }
+
     // ── Session lifecycle ─────────────────────────────────────────────────────────
+
+    /** Shared trigger for the YouTube search-based album fallback, used both when MusicBrainz has
+     *  no confident artist match at all AND when it has a confident match but (after merging
+     *  whatever's already cached) zero actual release-groups to show — those are different
+     *  reasons but the same recovery action, and consolidating them into one helper avoids the
+     *  fiddly "is this catalog actually empty" condition getting copy-pasted slightly wrong across
+     *  runSession's two branches and reconcileSession. [base] is whatever albums are already known
+     *  (local-only, or already-cached MusicBrainz albums) — runSearchFallback merges its results
+     *  into this rather than replacing it. */
+    private suspend fun triggerEmptyCatalogFallback(
+        session: ArtistResolutionSession,
+        displayName: String,
+        normalizedArtistKey: String,
+        base: List<Album>,
+        reason: String
+    ) {
+        session.debug = "MusicBrainz: $reason for '$displayName' — using search fallback"
+        Log.d(TAG, session.debug)
+        runCatching { runSearchFallback(session, displayName, normalizedArtistKey, base) }
+            .onFailure { e -> Log.e(TAG, "runSearchFallback('$displayName') threw", e) }
+    }
 
     private suspend fun runSession(session: ArtistResolutionSession) = withContext(Dispatchers.IO) {
         val key = session.normalizedKey
@@ -201,6 +242,29 @@ class ArtistRepository @Inject constructor(
         // Whatever MusicBrainz has to say about Albums arrives as a later update, not a gate.
         publishAlbums(session, localAlbums)
 
+        // Fast preview: a single plain YouTube search for the artist name, run unconditionally
+        // and CONCURRENTLY with MusicBrainz resolution below — not gated behind "MusicBrainz has
+        // no confident match" the way the full search fallback is. MusicBrainz is rate-limited to
+        // ~1 request/second, so a prolific artist's full catalog can take well over a minute to
+        // resolve; a NewPipe/YouTube search has no such limit and typically returns in a couple of
+        // seconds. This is what actually gets real, playable songs on screen quickly regardless of
+        // catalog size — MusicBrainz still drives the canonical album organization/completeness,
+        // it just no longer gates the very first content. Merges into session.localTracks the same
+        // way runSearchFallback's own general search does; MusicBrainz-matched tracks that turn
+        // out to be the same video (same id) simply dedupe naturally once they arrive.
+        resolverScope.launch {
+            runCatching {
+                val preview = searchRepository.searchMultiPage(displayName, maxPages = FAST_PREVIEW_MAX_PAGES)
+                    .filter { trackCreditsArtist(it, key) }
+                if (preview.isNotEmpty()) {
+                    session.updateMutex.withLock {
+                        session.localTracks = dedupeById(session.localTracks + preview)
+                        session.state.value = assembleArtist(session, session.albums)
+                    }
+                }
+            }.onFailure { e -> Log.e(TAG, "fast preview search('$displayName') threw", e) }
+        }
+
         val cachedResolution = musicBrainzDao.getArtistResolution(key)
 
         if (cachedResolution != null) {
@@ -208,10 +272,7 @@ class ArtistRepository @Inject constructor(
             if (mbid == null) {
                 // Already confirmed on a previous visit that MusicBrainz doesn't have this
                 // artist — go straight to the fallback, no point re-querying to find out again.
-                session.debug = "MusicBrainz: cached as 'no match' for '$displayName' — using search fallback"
-                Log.d(TAG, session.debug)
-                runCatching { runSearchFallback(session, displayName, key, localAlbums) }
-                    .onFailure { e -> Log.e(TAG, "runSearchFallback('$displayName') threw", e) }
+                triggerEmptyCatalogFallback(session, displayName, key, localAlbums, "cached as 'no match'")
                 return@withContext
             }
 
@@ -228,12 +289,29 @@ class ArtistRepository @Inject constructor(
 
             // Only now check MusicBrainz for anything released/added since the last visit —
             // this happens after real content is already on screen, not before.
-            val releaseGroups = runCatching { musicBrainzRepository.getAlbumReleaseGroups(mbid) }.getOrDefault(emptyList())
+            val releaseGroups = runCatching { musicBrainzRepository.getReleaseGroups(mbid) }.getOrDefault(emptyList())
+
+            // A confident artist match with zero release-groups (and nothing already cached
+            // either) is NOT the same state as "no music found" — it usually means MusicBrainz's
+            // catalog for this artist doesn't fit the release-group query at all (e.g. an artist
+            // known only for collaborations/features, or a genuine MusicBrainz coverage gap), not
+            // that the artist has no music. Recover via the same search fallback used when
+            // MusicBrainz doesn't know the artist at all, rather than dead-ending on "0 songs".
+            if (trulyCached.isEmpty() && releaseGroups.isEmpty()) {
+                triggerEmptyCatalogFallback(
+                    session, displayName, key, localAlbums,
+                    "mbid=$mbid but zero release-groups"
+                )
+                return@withContext
+            }
+
             val cachedIds = trulyCached.map { it.id }.toSet()
             val pendingGroups = releaseGroups.filterNot { it.id in cachedIds }
             if (pendingGroups.isEmpty()) {
-                session.debug = "MusicBrainz: '$displayName' — ${trulyCached.size} album(s), all cached, nothing new"
-                Log.d(TAG, session.debug)
+                logCatalogDiagnostics(
+                    session, displayName,
+                    extra = "${trulyCached.size} album(s), all cached, nothing new"
+                )
                 return@withContext
             }
 
@@ -268,14 +346,16 @@ class ArtistRepository @Inject constructor(
         musicBrainzDao.upsertArtistResolution(MbArtistResolutionEntity(key, resolved, System.currentTimeMillis()))
 
         if (resolved == null) {
-            session.debug = "MusicBrainz: no confident match for '$displayName' — using search fallback"
-            Log.d(TAG, session.debug)
-            runCatching { runSearchFallback(session, displayName, key, localAlbums) }
-                .onFailure { e -> Log.e(TAG, "runSearchFallback('$displayName') threw", e) }
+            triggerEmptyCatalogFallback(session, displayName, key, localAlbums, "no confident match")
             return@withContext
         }
 
-        val releaseGroups = runCatching { musicBrainzRepository.getAlbumReleaseGroups(resolved) }.getOrDefault(emptyList())
+        val releaseGroups = runCatching { musicBrainzRepository.getReleaseGroups(resolved) }.getOrDefault(emptyList())
+        if (releaseGroups.isEmpty()) {
+            triggerEmptyCatalogFallback(session, displayName, key, localAlbums, "mbid=$resolved but zero release-groups")
+            return@withContext
+        }
+
         val shells = releaseGroups.map { it.toShell(displayName) }
         publishAlbums(session, localAlbums + shells)
         session.debug = "MusicBrainz: mbid=$resolved, ${releaseGroups.size} release group(s) to resolve"
@@ -306,10 +386,52 @@ class ArtistRepository @Inject constructor(
 
         val resolvedIds = pendingGroups.map { it.id }.toSet()
         val resolvedNow = session.albums.filter { it.id in resolvedIds }
-        session.debug = "MusicBrainz: '$displayName' finished — $priorCachedCount previously cached, " +
-            "${resolvedNow.size} resolved this pass: " +
-            resolvedNow.joinToString("; ") { "'${it.title}': ${it.tracks.size} tracks" }
-        Log.d(TAG, session.debug)
+        logCatalogDiagnostics(
+            session, displayName,
+            extra = "$priorCachedCount previously cached, ${resolvedNow.size} resolved this pass: " +
+                resolvedNow.joinToString("; ") { "'${it.title}': ${it.tracks.size} tracks" }
+        )
+    }
+
+    /** Development diagnostic — logs (and stores in [ArtistResolutionSession.debug], already
+     *  surfaced on-screen by ArtistScreen's temporary debug text) a full breakdown of where this
+     *  artist's catalog currently stands: how many MusicBrainz release-groups actually resolved
+     *  to a track, how many of those tracks matched a playable YouTube video vs. didn't (an album
+     *  MusicBrainz confirms exists but the app couldn't find a video for — otherwise invisible,
+     *  since [assembleArtist] filters out empty-track albums entirely), the YouTube-only "singles"
+     *  bucket size, and the final deduplicated total. This is the "no unexplained disappearance of
+     *  catalog items" requirement made checkable without guessing. */
+    private fun logCatalogDiagnostics(session: ArtistResolutionSession, displayName: String, extra: String) {
+        val mbAlbums = session.albums.filter { !it.isLoading }
+        val mbAlbumsWithTracks = mbAlbums.filter { it.tracks.isNotEmpty() }
+        val mbAlbumsEmpty = mbAlbums.filter { it.tracks.isEmpty() }
+        val canonicalTrackCount = mbAlbumsWithTracks.sumOf { it.tracks.size }
+        val youtubeOnlyCount = session.localTracks.size
+        // Same "all resolved albums, not just the display-deduped view" source assembleArtist()
+        // now uses for Popular/All Songs — this number is what actually appears on the Artist
+        // Page, not a separate figure that could silently diverge from it again.
+        val total = (mbAlbumsWithTracks.flatMap { it.tracks } + session.localTracks).distinctBy { it.id }.size
+        val albumGroupCount = mbAlbums.distinctBy { ArtistNameUtils.normalize(it.title) }.size
+
+        val summary = buildString {
+            appendLine("=== ARTIST CATALOG DEBUG ===")
+            appendLine("Artist: $displayName")
+            appendLine("Release groups: resolved=${mbAlbums.size} withTracks=${mbAlbumsWithTracks.size}")
+            appendLine("Album groups (display, deduped by title): $albumGroupCount")
+            appendLine("Canonical tracks: $canonicalTrackCount")
+            appendLine("YouTube-only tracks: $youtubeOnlyCount")
+            appendLine("Artist-wide catalog (Popular/All Songs source, deduplicated by id): $total")
+            if (mbAlbumsEmpty.isNotEmpty()) {
+                appendLine(
+                    "Release groups MusicBrainz confirms but with 0 matched videos " +
+                        "(canonical-track -> YouTube matching failed for every track):"
+                )
+                mbAlbumsEmpty.forEach { appendLine("  - '${it.title}'") }
+            }
+            appendLine(extra)
+        }
+        Log.d(TAG, summary)
+        session.debug = summary
     }
 
     /** Called on every revisit to an artist page after the first full resolution has already
@@ -343,13 +465,17 @@ class ArtistRepository @Inject constructor(
                 val resolved = mbidOutcome.getOrNull()
                 musicBrainzDao.upsertArtistResolution(MbArtistResolutionEntity(key, resolved, System.currentTimeMillis()))
                 if (resolved == null) {
-                    session.debug = "MusicBrainz: no confident match for '${session.displayName}' — using search fallback"
-                    Log.d(TAG, session.debug)
-                    runCatching { runSearchFallback(session, session.displayName, key, session.albums) }
-                        .onFailure { e -> Log.e(TAG, "runSearchFallback('${session.displayName}') threw", e) }
+                    triggerEmptyCatalogFallback(session, session.displayName, key, session.albums, "no confident match")
                     return
                 }
-                val releaseGroups = runCatching { musicBrainzRepository.getAlbumReleaseGroups(resolved) }.getOrDefault(emptyList())
+                val releaseGroups = runCatching { musicBrainzRepository.getReleaseGroups(resolved) }.getOrDefault(emptyList())
+                if (releaseGroups.isEmpty()) {
+                    triggerEmptyCatalogFallback(
+                        session, session.displayName, key, session.albums,
+                        "mbid=$resolved but zero release-groups"
+                    )
+                    return
+                }
                 val shells = releaseGroups.map { it.toShell(session.displayName) }
                 publishAlbums(session, session.albums + shells)
                 resolvePendingGroups(session, releaseGroups, session.displayName, key, session.localTracks, priorCachedCount = 0)
@@ -421,6 +547,24 @@ class ArtistRepository @Inject constructor(
             }.awaitAll()
         }
 
+        // Prefer Cover Art Archive's purpose-made cover over an incidental matched-video
+        // thumbnail when it's actually confirmed to exist — a video thumbnail can be an old,
+        // sub-HD, differently-cropped, or watermarked upload even when the video itself matched
+        // correctly (verified concretely: Gwen Stefani's "You Make It Feel Like Christmas" and
+        // "Love. Angel. Music. Baby." both have genuine ~1200px Cover Art Archive covers, but were
+        // being shown with their matched video's noticeably softer thumbnail instead — the loading
+        // shell already used the CAA URL via toShell(), so this was an already-good image being
+        // replaced by a worse one the moment resolution finished, exactly the kind of downgrade
+        // that shouldn't happen). Falls back to the matched video thumbnail only when Cover Art
+        // Archive is confirmed to have nothing, rather than blindly trusting a URL that might 404.
+        // Decided once here and persisted on MbAlbumEntity — not re-derived on every cached read.
+        val hasCoverArt = musicBrainzRepository.hasCoverArt(group.id)
+        val thumbnailUrl = if (hasCoverArt) {
+            musicBrainzCoverArtUrl(group.id)
+        } else {
+            matched.firstNotNullOfOrNull { it.second?.thumbnailUrl } ?: musicBrainzCoverArtUrl(group.id)
+        }
+
         musicBrainzDao.upsertAlbum(
             MbAlbumEntity(
                 id = group.id,
@@ -428,7 +572,8 @@ class ArtistRepository @Inject constructor(
                 artistName = artistName,
                 title = group.title,
                 year = group.year,
-                resolvedAtMs = System.currentTimeMillis()
+                resolvedAtMs = System.currentTimeMillis(),
+                thumbnailUrl = thumbnailUrl
             )
         )
         musicBrainzDao.deleteTracksForAlbum(group.id)
@@ -449,7 +594,7 @@ class ArtistRepository @Inject constructor(
             id = group.id,
             title = group.title,
             artist = artistName,
-            thumbnailUrl = matched.firstNotNullOfOrNull { it.second?.thumbnailUrl } ?: musicBrainzCoverArtUrl(group.id),
+            thumbnailUrl = thumbnailUrl,
             year = group.year,
             tracks = matched.mapNotNull { (mbTrack, track) ->
                 track?.copy(title = mbTrack.title.ifBlank { track.title }, album = group.title)
@@ -462,7 +607,11 @@ class ArtistRepository @Inject constructor(
      *  artist's page already knows about locally (free — no network), then, if unresolved, one
      *  targeted single-track search — verified in both cases by normalized title (qualifiers
      *  stripped) plus duration when both sides have one. The search itself is gated by
-     *  [trackSearchSemaphore], not the local check. */
+     *  [trackSearchSemaphore], not the local check. Uses [SearchRepository.searchRaw] (skips
+     *  [com.example.ytmusicapp.domain.engine.MusicContentClassifier]) — this function already
+     *  independently verifies title/duration/artist-credit against a MusicBrainz-confirmed real
+     *  recording, so a generic search-quality classifier adds no value here, only the risk of
+     *  dropping the correct match before this verification ever sees it. */
     private suspend fun matchCanonicalTrack(
         mbTrack: MbTrack,
         artistName: String,
@@ -481,13 +630,12 @@ class ArtistRepository @Inject constructor(
             ?.let { return it }
 
         val results = trackSearchSemaphore.withPermit {
-            runCatching { searchRepository.search("${mbTrack.title} $artistName") }.getOrDefault(emptyList())
+            runCatching { searchRepository.searchRaw("${mbTrack.title} $artistName") }.getOrDefault(emptyList())
         }
         return results.firstOrNull { track ->
             baseTitle(track.title) == targetBase &&
                 durationMatches(track.durationMs) &&
-                ArtistNameUtils.extractArtists(track.title, track.artist)
-                    .any { ArtistNameUtils.normalize(it) == normalizedArtistKey }
+                trackCreditsArtist(track, normalizedArtistKey)
         }
     }
 
@@ -511,13 +659,24 @@ class ArtistRepository @Inject constructor(
     }
 
     private suspend fun assembleArtist(session: ArtistResolutionSession, albums: List<Album>): Artist {
+        // displayAlbums is a VIEW for the Albums section (deduped by normalized title so a
+        // deluxe/remaster reissue doesn't render as a second near-identical card) — it must never
+        // gate which tracks count as the artist's songs. Two release-groups that happen to
+        // normalize to the same title (common with reissues) previously meant the "losing" one's
+        // tracks silently vanished from Popular/All Songs entirely, even after fully resolving —
+        // songs are the primary catalog, album grouping is metadata on top of it, not a filter on
+        // top of it.
         val displayAlbums = albums
             .filter { it.isLoading || it.tracks.isNotEmpty() }
             .distinctBy { ArtistNameUtils.normalize(it.title) }
 
         val allSongsMap = LinkedHashMap<String, Track>()
         session.localTracks.forEach { allSongsMap[it.id] = it }
-        displayAlbums.forEach { album -> album.tracks.forEach { allSongsMap.putIfAbsent(it.id, it) } }
+        // From ALL resolved albums, not just displayAlbums — every track this artist is
+        // confirmed (by MusicBrainz + a matched playable video, or by local/YouTube-fallback
+        // discovery) to have counts toward the catalog, regardless of which album card ends up
+        // representing it (or a title-collision duplicate) in the Albums section.
+        albums.forEach { album -> album.tracks.forEach { allSongsMap.putIfAbsent(it.id, it) } }
         val allSongs = allSongsMap.values.toList()
 
         val albumTrackIds = displayAlbums.flatMap { it.tracks }.map { it.id }.toSet()
@@ -550,7 +709,13 @@ class ArtistRepository @Inject constructor(
         id = id,
         title = title,
         artist = artistName,
-        thumbnailUrl = tracks.firstNotNullOfOrNull { it.matchedThumbnailUrl } ?: musicBrainzCoverArtUrl(id),
+        // The CAA-vs-matched-video priority was already decided once in resolveAlbum() and
+        // persisted here — reading a cached album never needs to re-derive it (or make a network
+        // call to do so). Blank only for rows written before this field existed; those fall back
+        // to Cover Art Archive directly rather than the old backwards (matched-video-first)
+        // logic, so an already-cached album gets the corrected priority immediately rather than
+        // only after it happens to naturally re-resolve.
+        thumbnailUrl = thumbnailUrl.ifBlank { musicBrainzCoverArtUrl(id) },
         year = year,
         tracks = tracks.mapNotNull { t ->
             val videoId = t.matchedVideoId ?: return@mapNotNull null
@@ -578,7 +743,7 @@ class ArtistRepository @Inject constructor(
      *  already returned (no Cover Art Archive guess needed here). The per-album track fetch that
      *  follows is bounded by the same [albumSemaphore]/[trackSearchSemaphore] as everything else,
      *  fixing the old unbounded-parallel version of this method. It still resolves and publishes
-     *  as one batch rather than album-by-album, because [dedupeByBaseTitle]/cross-album-conflict
+     *  as one batch rather than album-by-album, because [dedupeById]/cross-album-conflict
      *  resolution below fundamentally needs every album's results before it can decide which
      *  album a given track actually belongs to — publishing one album before its siblings finish
      *  would risk exactly the cross-album leakage that logic exists to prevent.
@@ -588,8 +753,12 @@ class ArtistRepository @Inject constructor(
      *   - the same popular song from a DIFFERENT album leaking into every album's results
      *     (search relevance leans on the artist name more than the album title) — resolved by
      *     keeping a track only in the album where it ranked best in that album's own search;
-     *   - the same song's remixes/edits appearing as separate near-duplicate rows — collapsed
-     *     to one representative per base title (qualifiers stripped). */
+     *   - the exact same video appearing twice in one album's raw results — collapsed by
+     *     videoId only ([dedupeById]). Distinct videos that merely share a title after qualifier-
+     *     stripping (a studio cut, a live cover, an acoustic version) are deliberately NOT
+     *     collapsed here — for catalog-completeness purposes those are different content, and
+     *     incorrectly discarding a real distinct recording is worse than a small amount of
+     *     genuine duplication. */
     private suspend fun runSearchFallback(
         session: ArtistResolutionSession,
         artistName: String,
@@ -642,10 +811,7 @@ class ArtistRepository @Inject constructor(
                             trackSearchSemaphore.withPermit { searchRepository.getAlbumTracks(result.title, artistName) }
                         }.fold(
                             onSuccess = { rawTracks ->
-                                val tracks = rawTracks.filter { track ->
-                                    ArtistNameUtils.extractArtists(track.title, track.artist)
-                                        .any { ArtistNameUtils.normalize(it) == normalizedArtistKey }
-                                }
+                                val tracks = rawTracks.filter { track -> trackCreditsArtist(track, normalizedArtistKey) }
                                 RawAlbumTracks(result, tracks, null)
                             },
                             onFailure = { e ->
@@ -673,7 +839,7 @@ class ArtistRepository @Inject constructor(
 
         val outcomes = raw.map { r ->
             val owned = r.tracks.filter { bestAlbumForTrack[it.id]?.first == r.result.id }
-            val deduped = dedupeByBaseTitle(owned, artistName)
+            val deduped = dedupeById(owned)
             AlbumFetchOutcome(
                 title = r.result.title,
                 trackCount = deduped.size,
@@ -690,21 +856,35 @@ class ArtistRepository @Inject constructor(
             )
         }
 
-        session.debug = "searchAlbums: ${searchResults.size} raw -> ${candidates.size} matched artist. " +
-            outcomes.joinToString("; ") { o ->
-                if (o.error != null) "'${o.title}': ERROR ${o.error}" else "'${o.title}': ${o.trackCount} tracks"
-            }
-        Log.d(TAG, session.debug)
+        // A plain song search alongside the album search: searchAlbums only finds content YouTube
+        // Music groups into an "album" playlist, which misses standalone singles, covers, and
+        // performances that aren't part of any such grouping — a common gap for niche/independent
+        // artists. Folded into session.localTracks (not a synthetic Album — this is ungrouped
+        // content) so assembleArtist's existing "singles" bucket picks it up naturally.
+        val alreadyKnownIds = (localAlbums.flatMap { it.tracks } + outcomes.mapNotNull { it.album }.flatMap { it.tracks })
+            .map { it.id }.toSet()
+        val generalResults = runCatching { searchRepository.search(artistName) }.getOrDefault(emptyList())
+        val generalMatches = dedupeById(generalResults.filter { trackCreditsArtist(it, normalizedArtistKey) })
+            .filterNot { it.id in alreadyKnownIds }
+        session.localTracks = dedupeById(session.localTracks + generalMatches)
 
         publishAlbums(session, localAlbums + outcomes.mapNotNull { it.album })
+        logCatalogDiagnostics(
+            session, artistName,
+            extra = "searchAlbums: ${searchResults.size} raw -> ${candidates.size} matched artist; " +
+                "general search: ${generalResults.size} raw -> ${generalMatches.size} new. " +
+                outcomes.joinToString("; ") { o ->
+                    if (o.error != null) "'${o.title}': ERROR ${o.error}" else "'${o.title}': ${o.trackCount} tracks"
+                }
+        )
     }
 
-    private fun dedupeByBaseTitle(tracks: List<Track>, artistName: String): List<Track> {
+    // Conservative on purpose: only collapses a literal duplicate videoId, never two distinct
+    // videos that happen to share a title after qualifier-stripping (a studio cut vs. a live
+    // cover vs. an acoustic version are different content, not duplicates of each other).
+    private fun dedupeById(tracks: List<Track>): List<Track> {
         val seen = LinkedHashMap<String, Track>()
-        tracks.forEach { track ->
-            val baseKey = baseTitleKey(track.title, artistName)
-            seen.putIfAbsent(baseKey.ifBlank { track.id }, track)
-        }
+        tracks.forEach { track -> seen.putIfAbsent(track.id, track) }
         return seen.values.toList()
     }
 
